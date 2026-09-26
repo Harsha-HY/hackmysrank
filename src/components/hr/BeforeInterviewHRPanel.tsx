@@ -5,7 +5,8 @@ import {
   ShieldCheck, CheckCircle2, AlertCircle, Sparkles, HelpCircle,
   ChevronRight, ExternalLink, Layers, Database, Cpu, Terminal,
   RefreshCw, Search, Briefcase, Play, Bug, Check, X, Eye, ArrowRight,
-  Key, Settings, Zap, Compass, CheckCircle
+  ArrowLeft, Key, Settings, Zap, Compass, CheckCircle, Table as TableIcon,
+  Download, User
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +40,9 @@ export const BeforeInterviewHRContent = () => {
   const [geminiApiKeyInput, setGeminiApiKeyInput] = useState(getGeminiApiKey());
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "dossier">("list");
+  const [statusFilter, setStatusFilter] = useState<"all" | "top_match" | "interview_ready" | "pending" | "rejected">("all");
+  const [resumePreviewApp, setResumePreviewApp] = useState<CandidateApplicationSubmission | null>(null);
 
   // 7 Stages matching Landing Page & HR Architecture
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "skillmap" | "hrevidence">("ats");
@@ -405,6 +409,21 @@ export const BeforeInterviewHRContent = () => {
     });
   };
 
+  // Status-filtered applications
+  const displayedApps = filteredApps.filter((app) => {
+    if (statusFilter === "top_match") return app.resumeScore >= 90;
+    if (statusFilter === "interview_ready") return app.overallStatus === "Interview Ready";
+    if (statusFilter === "pending") return app.overallStatus !== "Interview Ready" && app.currentStage !== "rejected";
+    if (statusFilter === "rejected") return app.currentStage === "rejected" || app.overallStatus.includes("Rejected");
+    return true;
+  });
+
+  const allCount = filteredApps.length;
+  const topMatchCount = filteredApps.filter((a) => a.resumeScore >= 90).length;
+  const interviewReadyCount = filteredApps.filter((a) => a.overallStatus === "Interview Ready").length;
+  const pendingCount = filteredApps.filter((a) => a.overallStatus !== "Interview Ready" && a.currentStage !== "rejected").length;
+  const rejectedCount = filteredApps.filter((a) => a.currentStage === "rejected" || a.overallStatus.includes("Rejected")).length;
+
   return (
     <div className="space-y-6">
       {/* Top Banner: Workflow Header + Job Selector + Simulation Tools */}
@@ -433,6 +452,32 @@ export const BeforeInterviewHRContent = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* View Mode Toggle */}
+            <div className="flex bg-paper-2 p-1 rounded-xl border border-ink/15">
+              <button
+                onClick={() => setViewMode("list")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                  viewMode === "list"
+                    ? "bg-forest text-paper shadow-sm"
+                    : "text-ink hover:bg-ink/5"
+                }`}
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                <span>Candidates List</span>
+              </button>
+              <button
+                onClick={() => setViewMode("dossier")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                  viewMode === "dossier"
+                    ? "bg-forest text-paper shadow-sm"
+                    : "text-ink hover:bg-ink/5"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Screening Dossier</span>
+              </button>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
@@ -488,147 +533,388 @@ export const BeforeInterviewHRContent = () => {
           </div>
 
           <div className="sm:col-span-3 flex items-center justify-end text-xs font-mono text-ink-muted">
-            <span>Showing {filteredApps.length} candidates</span>
+            <span>Showing {displayedApps.length} of {filteredApps.length} candidates</span>
           </div>
         </div>
       </div>
 
-      {/* When no candidate matches filter */}
-      {filteredApps.length === 0 && (
-        <div className="p-12 text-center space-y-4 rounded-2xl border border-ink/15 bg-paper shadow-md">
-          <Briefcase className="w-10 h-10 text-ink-muted mx-auto opacity-50" />
-          <div className="space-y-1">
-            <h4 className="font-serif-display text-lg text-ink font-semibold">No candidates found</h4>
-            <p className="text-xs text-ink-soft">
-              No applications match your search query or selected job opening.
-            </p>
+      {/* VIEW 1: CLEAN CANDIDATES TABLE (WITH ARROW MARK, RESUME, AND GITHUB REPO LINKS) */}
+      {viewMode === "list" && (
+        <div className="rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper shadow-xl overflow-hidden">
+          {/* Status Filter Badges (Matching Candidates reference design) */}
+          <div className="p-4 md:px-6 bg-paper-2 border-b border-ink/10 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => setStatusFilter("all")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                  statusFilter === "all"
+                    ? "bg-ink text-paper shadow-sm"
+                    : "bg-paper text-ink hover:bg-ink/5 border border-ink/10"
+                }`}
+              >
+                All ({allCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter("top_match")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1 ${
+                  statusFilter === "top_match"
+                    ? "bg-forest text-paper shadow-sm"
+                    : "bg-paper text-ink hover:bg-ink/5 border border-ink/10"
+                }`}
+              >
+                <span>⭐ Top Match (≥90%)</span>
+                <span>({topMatchCount})</span>
+              </button>
+              <button
+                onClick={() => setStatusFilter("pending")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                  statusFilter === "pending"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "bg-paper text-ink hover:bg-ink/5 border border-ink/10"
+                }`}
+              >
+                Screened / Pending ({pendingCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter("interview_ready")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                  statusFilter === "interview_ready"
+                    ? "bg-forest text-paper shadow-sm"
+                    : "bg-paper text-ink hover:bg-ink/5 border border-ink/10"
+                }`}
+              >
+                Interview Ready ({interviewReadyCount})
+              </button>
+              <button
+                onClick={() => setStatusFilter("rejected")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                  statusFilter === "rejected"
+                    ? "bg-destructive text-destructive-foreground shadow-sm"
+                    : "bg-paper text-ink hover:bg-ink/5 border border-ink/10"
+                }`}
+              >
+                Rejected ({rejectedCount})
+              </button>
+            </div>
+
+            <div className="text-xs text-ink-muted flex items-center gap-1.5">
+              <span>Click on any candidate or</span>
+              <span className="font-mono font-semibold text-forest flex items-center gap-0.5">
+                arrow mark <ArrowRight className="w-3 h-3 inline" />
+              </span>
+              <span>to inspect 7-stage dossier</span>
+            </div>
           </div>
-          <div className="flex items-center justify-center gap-2 pt-2">
-            <Button
-              size="sm"
-              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], true)}
-              className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Simulate Candidate Application (Match Stack)
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], false)}
-              className="text-xs px-4 text-destructive border-destructive/30 hover:bg-destructive/10"
-            >
-              Simulate Auto-Rejection Candidate
-            </Button>
-          </div>
+
+          {/* Table */}
+          {displayedApps.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <Briefcase className="w-10 h-10 text-ink-muted mx-auto opacity-40" />
+              <h4 className="font-serif-display text-lg text-ink font-semibold">No candidates found in this view</h4>
+              <p className="text-xs text-ink-soft">Try switching status filters or simulate an applicant above.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-ink/10 bg-paper-2 text-ink-muted font-mono uppercase tracking-wider text-[11px]">
+                    <th className="py-3.5 px-4 font-medium">Candidate</th>
+                    <th className="py-3.5 px-4 font-medium">Job Applied</th>
+                    <th className="py-3.5 px-4 font-medium">ATS Score</th>
+                    <th className="py-3.5 px-4 font-medium">GitHub Authenticity</th>
+                    <th className="py-3.5 px-4 font-medium">Resume</th>
+                    <th className="py-3.5 px-4 font-medium">GitHub Repo</th>
+                    <th className="py-3.5 px-4 font-medium">Screening Status</th>
+                    <th className="py-3.5 px-4 font-medium text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink/10">
+                  {displayedApps.map((app) => {
+                    const isPassed = app.resumeScore >= (activeJob?.resumeCutoff || 90);
+                    const isRejected = app.currentStage === "rejected" || app.overallStatus.includes("Rejected");
+                    const isInterviewReady = app.overallStatus === "Interview Ready";
+                    const isSelected = selectedAppId === app.id;
+
+                    return (
+                      <tr
+                        key={app.id}
+                        onClick={() => {
+                          setSelectedAppId(app.id);
+                          setViewMode("dossier");
+                        }}
+                        className={`group cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-forest/5 hover:bg-forest/10"
+                            : "hover:bg-ink/[0.02]"
+                        }`}
+                      >
+                        {/* Candidate Column */}
+                        <td className="py-4 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-forest/10 border border-forest/20 text-forest font-serif-display font-bold text-sm grid place-items-center shrink-0">
+                              {(app.candidateName || "A").charAt(0)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-ink text-sm flex items-center gap-1.5 group-hover:text-forest transition-colors">
+                                <span>{app.candidateName}</span>
+                                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-forest text-xs">
+                                  ↗
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-ink-muted font-mono truncate max-w-[200px]">
+                                {app.candidateEmail}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Job Applied Column */}
+                        <td className="py-4 px-4 font-medium text-ink">
+                          <div>{app.jobTitle}</div>
+                          <div className="text-[10px] text-ink-muted font-mono mt-0.5">Applied: {app.appliedDate || "Recent"}</div>
+                        </td>
+
+                        {/* ATS Score Column */}
+                        <td className="py-4 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs ${
+                              app.resumeScore >= 90
+                                ? "bg-forest/15 text-forest border border-forest/20"
+                                : app.resumeScore >= 70
+                                ? "bg-amber-500/15 text-amber-700 border border-amber-500/20"
+                                : "bg-destructive/15 text-destructive border border-destructive/20"
+                            }`}>
+                              {app.resumeScore}/100
+                            </div>
+                            <span className="text-[11px] text-ink-muted hidden sm:inline">
+                              {app.resumeScore >= 90 ? "Strong Match" : app.resumeScore >= 70 ? "Qualified" : "Sub-Cutoff"}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* GitHub Authenticity */}
+                        <td className="py-4 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 bg-ink/10 h-1.5 rounded-full overflow-hidden">
+                              <div
+                                className="bg-forest h-full rounded-full"
+                                style={{ width: `${app.authenticityPercentage || 85}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[11px] font-semibold text-ink">
+                              {app.authenticityPercentage || 85}% Real
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Resume Link */}
+                        <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => setResumePreviewApp(app)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-ink/5 hover:bg-forest/10 hover:text-forest text-ink border border-ink/10 transition-colors"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-forest" />
+                            <span>View Resume</span>
+                          </button>
+                        </td>
+
+                        {/* GitHub Repo Link */}
+                        <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                          <a
+                            href={formatExternalUrl(app.githubRepo1Url || app.githubAccountUrl || "https://github.com")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-ink/5 hover:bg-forest/10 hover:text-forest text-ink border border-ink/10 transition-colors"
+                          >
+                            <GitBranch className="w-3.5 h-3.5 text-forest" />
+                            <span>GitHub Repo</span>
+                            <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-60" />
+                          </a>
+                        </td>
+
+                        {/* Screening Status */}
+                        <td className="py-4 px-4">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-mono text-[11px] font-semibold ${
+                            isRejected
+                              ? "bg-destructive/10 text-destructive border border-destructive/20"
+                              : isInterviewReady
+                              ? "bg-forest text-paper font-semibold shadow-sm"
+                              : "bg-forest/10 text-forest border border-forest/20"
+                          }`}>
+                            {isRejected ? (
+                              <>
+                                <X className="w-3 h-3" /> Auto-Rejected
+                              </>
+                            ) : isInterviewReady ? (
+                              <>
+                                <CheckCircle className="w-3 h-3" /> Interview Ready
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-3 h-3" /> Passed Cutoffs
+                              </>
+                            )}
+                          </span>
+                        </td>
+
+                        {/* Arrow Mark / Inspect Button */}
+                        <td className="py-4 px-4 text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedAppId(app.id);
+                              setViewMode("dossier");
+                            }}
+                            className="h-8 px-3 rounded-xl bg-forest/10 hover:bg-forest text-forest hover:text-paper text-xs font-medium gap-1.5 transition-all shadow-sm"
+                          >
+                            <span>Inspect Dossier</span>
+                            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Interactive Recruiter Dossier Matching Screenshot Exactly */}
-      {currentApp && (
+      {/* VIEW 2: INTERACTIVE RECRUITER DOSSIER (MATCHING SCREENSHOT WITH CLEAN SCORE CARD MENU BAR) */}
+      {viewMode === "dossier" && currentApp && (
         <div className="w-full rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper shadow-2xl overflow-hidden">
-          {/* Top Header: Candidate Switcher */}
-          <div className="p-6 md:p-8 bg-paper-2 border-b border-ink/10">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-              <div>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20 mb-3">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Candidate Screening Dossier (HR Studio)
+          {/* Top Menu Bar: Clean, focused applicant navigation with Score Card */}
+          <div className="p-6 md:p-7 bg-paper-2 border-b border-ink/10">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+              {/* Left: Back button + Candidate Title & Info */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-semibold bg-ink/5 hover:bg-ink/10 text-ink border border-ink/15 transition-colors"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Back to Candidates Table</span>
+                  </button>
+                  <span className="text-ink-muted">·</span>
+                  <span className="text-xs font-mono text-ink-muted">Candidate {filteredApps.findIndex(a => a.id === currentApp.id) + 1} of {filteredApps.length}</span>
                 </div>
-                <h3 className="font-serif-display text-2xl md:text-3xl text-ink">
-                  {currentApp.candidateName} — {currentApp.jobTitle}
-                </h3>
-                <p className="text-sm text-ink-soft mt-1 max-w-xl">
-                  Inspect candidate's ATS resume score, code authenticity ratio, repo coding challenges, dynamic AI interview probing, skill map, and make final recruiter advance/reject decisions.
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="font-serif-display text-2xl md:text-3xl text-ink font-semibold">
+                    {currentApp.candidateName} — {currentApp.jobTitle}
+                  </h3>
+                  <span className={`px-2.5 py-0.5 rounded-full font-mono text-xs font-semibold ${
+                    currentApp.currentStage === "rejected"
+                      ? "bg-destructive/10 text-destructive border border-destructive/20"
+                      : "bg-forest/10 text-forest border border-forest/20"
+                  }`}>
+                    {currentApp.overallStatus}
+                  </span>
+                </div>
+
+                <p className="text-xs text-ink-soft flex flex-wrap items-center gap-2">
+                  <span>{currentApp.candidateEmail}</span>
+                  <span className="text-ink-muted">·</span>
+                  <button
+                    onClick={() => setResumePreviewApp(currentApp)}
+                    className="text-forest hover:underline font-medium inline-flex items-center gap-1"
+                  >
+                    <FileText className="w-3 h-3" /> View Resume
+                  </button>
+                  <span className="text-ink-muted">·</span>
+                  <a
+                    href={formatExternalUrl(currentApp.githubRepo1Url || currentApp.githubAccountUrl || "https://github.com")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-forest hover:underline font-medium inline-flex items-center gap-1"
+                  >
+                    <GitBranch className="w-3 h-3" /> GitHub Repo <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
                 </p>
               </div>
 
-              {/* Candidate Switcher Buttons */}
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
-                {filteredApps.map((app) => {
-                  const active = currentApp.id === app.id;
-                  const isAppRejected = app.currentStage === "rejected";
-                  const isInterviewReady = app.overallStatus === "Interview Ready";
-                  return (
-                    <button
-                      key={app.id}
-                      onClick={() => setSelectedAppId(app.id)}
-                      className={`flex-1 sm:w-[220px] text-left p-3 rounded-xl transition-all relative ${
-                        active
-                          ? "bg-ink text-paper shadow-md"
-                          : "hover:bg-ink/5 text-ink"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-8 h-8 rounded-full grid place-items-center font-serif-display font-bold text-xs shrink-0 ${
-                          active ? "bg-paper text-ink" : "bg-forest/10 text-forest"
-                        }`}>
-                          {(app.candidateName || "A").charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs truncate">{app.candidateName}</div>
-                          <div className={`text-[11px] truncate ${active ? "text-paper/70" : "text-ink-muted"}`}>
-                            {app.jobTitle}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
-                        <span className={active ? "text-paper/80" : "text-ink-muted"}>ATS: {app.resumeScore}/100</span>
-                        <span className={`px-1.5 py-0.2 rounded ${
-                          isAppRejected
-                            ? "bg-destructive/20 text-destructive-foreground font-semibold"
-                            : isInterviewReady
-                            ? "bg-forest text-paper font-semibold"
-                            : "text-forest font-semibold"
-                        }`}>
-                          {isAppRejected ? "Rejected" : isInterviewReady ? "Interview Ready" : "Screened"}
-                        </span>
-                      </div>
-                      {active && (
-                        <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-forest animate-pulse" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+              {/* Right: Applicant Score Card Menu Bar Summary */}
+              <div className="flex flex-wrap items-center gap-3 bg-paper p-2.5 rounded-2xl border border-ink/10 shrink-0 shadow-sm">
+                {/* Score Card: ATS Score */}
+                <div className="px-3.5 py-2 rounded-xl bg-paper-2 border border-ink/10 text-center">
+                  <div className="text-[10px] font-mono uppercase text-ink-muted">ATS Score</div>
+                  <div className={`text-base font-bold font-serif-display ${
+                    currentApp.resumeScore >= 90 ? "text-forest" : "text-destructive"
+                  }`}>
+                    {currentApp.resumeScore}/100
+                  </div>
+                </div>
 
-            {/* Candidate Mini Profile Bar */}
-            <div className="mt-6 pt-6 border-t border-ink/10 flex flex-wrap items-center justify-between gap-4 text-xs">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="font-semibold text-ink">{currentApp.candidateName}</span>
-                <span className="text-ink-muted">·</span>
-                <span className="text-ink-soft">{currentApp.jobTitle}</span>
-                <span className="text-ink-muted">·</span>
-                <span className="text-ink-muted font-mono">{currentApp.candidateEmail}</span>
-                <span className="text-ink-muted">·</span>
-                <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-semibold ${
-                  currentApp.currentStage === "rejected"
-                    ? "bg-destructive/10 text-destructive border border-destructive/20"
-                    : "bg-forest/10 text-forest border border-forest/20"
-                }`}>
-                  {currentApp.overallStatus}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
+                {/* Score Card: Authenticity */}
+                <div className="px-3.5 py-2 rounded-xl bg-paper-2 border border-ink/10 text-center">
+                  <div className="text-[10px] font-mono uppercase text-ink-muted">Authenticity</div>
+                  <div className="text-base font-bold font-serif-display text-ink">
+                    {currentApp.authenticityPercentage || 85}%
+                  </div>
+                </div>
+
+                {/* Candidate Switcher Dropdown */}
+                <div className="pl-1 border-l border-ink/10">
+                  <select
+                    value={currentApp.id}
+                    onChange={(e) => setSelectedAppId(e.target.value)}
+                    className="px-3 py-2 text-xs rounded-xl border border-ink/15 bg-paper-2 text-ink font-medium focus:outline-none focus:border-forest"
+                  >
+                    {filteredApps.map((a, idx) => (
+                      <option key={a.id} value={a.id}>
+                        {idx + 1}. {a.candidateName} ({a.resumeScore}/100)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Gemini Re-Score Button */}
                 <Button
                   size="sm"
                   variant="outline"
                   disabled={isGeminiAnalyzing}
                   onClick={handleReanalyzeWithGemini}
-                  className="rounded-xl border-forest/30 text-forest hover:bg-forest/10 text-xs h-8 px-3 gap-1.5 shadow-sm"
+                  className="rounded-xl border-forest/30 text-forest hover:bg-forest/10 text-xs h-9 px-3 gap-1.5 shadow-sm"
                 >
                   <Sparkles className={`w-3.5 h-3.5 ${isGeminiAnalyzing ? "animate-spin" : ""}`} />
-                  <span>{isGeminiAnalyzing ? "Gemini Scoring..." : "AI Re-Score with Gemini"}</span>
+                  <span>{isGeminiAnalyzing ? "Scoring..." : "AI Re-Score"}</span>
                 </Button>
-                <div className="flex items-center gap-2">
-                  <span className="text-ink-muted">Detected Stacks:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {(currentApp.detectedRepoStacks || []).map((s) => (
-                      <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
+              </div>
+            </div>
+
+            {/* Detected Stacks Tags */}
+            <div className="mt-4 pt-4 border-t border-ink/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-ink-muted">Detected Stacks:</span>
+                <div className="flex flex-wrap gap-1">
+                  {(currentApp.detectedRepoStacks || []).map((s) => (
+                    <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
+                      {s}
+                    </span>
+                  ))}
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => handleAdvanceToInterview(currentApp)}
+                  className="bg-forest text-paper hover:bg-forest/90 text-xs h-8 px-3 shadow-sm"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Advance to Interview
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleReject(currentApp)}
+                  className="text-xs h-8 px-3 text-destructive border-destructive/30 hover:bg-destructive/10"
+                >
+                  <X className="w-3.5 h-3.5 mr-1" /> Reject
+                </Button>
               </div>
             </div>
           </div>
@@ -1391,6 +1677,114 @@ export const BeforeInterviewHRContent = () => {
               <Button size="sm" onClick={handleSaveApiKey} className="bg-forest text-paper hover:bg-forest/90 text-xs px-4">
                 Save &amp; Activate Gemini
               </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+      {/* Resume Preview Modal */}
+      {resumePreviewApp && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-2xl rounded-3xl border border-ink/15 bg-paper p-6 md:p-8 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b border-ink/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-forest/10 text-forest grid place-items-center">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-serif-display text-xl font-semibold text-ink">
+                    {resumePreviewApp.candidateName}'s Resume
+                  </h4>
+                  <p className="text-xs text-ink-muted">
+                    {resumePreviewApp.jobTitle} · Applied {resumePreviewApp.appliedDate || "Recently"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResumePreviewApp(null)}
+                className="w-8 h-8 rounded-full border border-ink/15 text-sm grid place-items-center hover:bg-ink/5"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Score & Stack Overview */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10">
+                <div className="text-[10px] font-mono text-ink-muted uppercase">ATS Score</div>
+                <div className={`text-xl font-bold font-serif-display ${
+                  resumePreviewApp.resumeScore >= 90 ? "text-forest" : "text-destructive"
+                }`}>
+                  {resumePreviewApp.resumeScore}/100
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10">
+                <div className="text-[10px] font-mono text-ink-muted uppercase">Code Authenticity</div>
+                <div className="text-xl font-bold font-serif-display text-ink">
+                  {resumePreviewApp.authenticityPercentage || 85}%
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10 col-span-2 sm:col-span-1">
+                <div className="text-[10px] font-mono text-ink-muted uppercase">Status</div>
+                <div className="text-xs font-semibold font-mono text-forest mt-1 truncate">
+                  {resumePreviewApp.overallStatus}
+                </div>
+              </div>
+            </div>
+
+            {/* Resume Summary Text */}
+            <div className="space-y-2">
+              <label className="text-xs font-mono uppercase text-ink-muted tracking-wider">
+                Resume Content &amp; Extracted Profile:
+              </label>
+              <div className="p-4 rounded-2xl bg-paper-2 border border-ink/10 text-xs text-ink leading-relaxed whitespace-pre-line max-h-60 overflow-y-auto">
+                {resumePreviewApp.resumeTextSummary || "Verified candidate background, skills, and project experience."}
+              </div>
+            </div>
+
+            {/* Matched Keywords */}
+            <div className="space-y-2">
+              <label className="text-xs font-mono uppercase text-ink-muted tracking-wider">
+                Matched Technical Keywords ({resumePreviewApp.matchedKeywords?.length || 0}):
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {(resumePreviewApp.matchedKeywords || []).map((k) => (
+                  <span key={k} className="px-2.5 py-1 rounded-lg bg-forest/10 border border-forest/20 text-forest font-mono text-xs">
+                    ✓ {k}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-ink/10">
+              <div className="text-xs text-ink-muted font-mono">
+                File: {resumePreviewApp.resumeFileName || "Candidate_Resume.pdf"}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setResumePreviewApp(null)}
+                  className="text-xs"
+                >
+                  Close
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setResumePreviewApp(null);
+                    setSelectedAppId(resumePreviewApp.id);
+                    setViewMode("dossier");
+                    setActiveTab("ats");
+                  }}
+                  className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
+                >
+                  Open Full ATS Analysis →
+                </Button>
+              </div>
             </div>
           </motion.div>
         </div>
