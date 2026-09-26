@@ -16,8 +16,12 @@ import {
   InspectedCodeFile,
   InspectedCodeLine,
 } from "./geminiResumeAnalyzer";
+import {
+  GitHubVerificationReport,
+  performGitHubCodeVerification,
+} from "./githubVerifier";
 
-export type { InspectedCodeFile, InspectedCodeLine };
+export type { InspectedCodeFile, InspectedCodeLine, GitHubVerificationReport };
 
 export interface JobCutoffs {
   id: string;
@@ -93,6 +97,7 @@ export interface CandidateApplicationSubmission {
   githubRejectionReason?: string;
   codeSignals: string[];
   inspectedCodeFiles?: InspectedCodeFile[];
+  githubVerificationReport?: GitHubVerificationReport;
 
   // Step 3: 5 Personalized MCQs generated from candidate's exact repo stacks
   generatedMCQs: {
