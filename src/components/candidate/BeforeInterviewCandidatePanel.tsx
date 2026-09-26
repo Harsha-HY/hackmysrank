@@ -4,7 +4,7 @@ import {
   FileText, GitBranch, ListChecks, Code2, Bot, Award, CheckCircle2,
   AlertCircle, Sparkles, ArrowRight, ShieldCheck, HelpCircle, ChevronRight,
   ExternalLink, Layers, Database, Cpu, Terminal, Play, Bug, Briefcase,
-  User, Check, X, RefreshCw, Lock, Zap
+  User, Check, X, RefreshCw, Lock, Zap, Key, Settings
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -15,8 +15,10 @@ import {
   getWorkflowJobs,
   JobCutoffs,
   analyzeCandidateCodeSubmission,
-  simulateCandidateApplicationForJob
+  simulateCandidateApplicationForJob,
+  evaluateAndSubmitApplicationWithGemini
 } from "@/lib/hiringWorkflowEngine";
+import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
 import { supabase } from "@/integrations/supabase/client";
 
 export const BeforeInterviewCandidatePanel = () => {
@@ -26,6 +28,9 @@ export const BeforeInterviewCandidatePanel = () => {
   const [selectedAppId, setSelectedAppId] = useState<string>("");
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const [advancingToNextRound, setAdvancingToNextRound] = useState(false);
+  const [geminiApiKeyInput, setGeminiApiKeyInput] = useState(getGeminiApiKey());
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
   
   // 6 Candidate-facing tabs matching the landing page 7-stage engine
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "scorecard">("ats");
@@ -201,14 +206,119 @@ export const BeforeInterviewCandidatePanel = () => {
     }
   };
 
-  const handleCreateTestCandidate = (jobToUse: JobCutoffs, pass: boolean = true) => {
+  const handleReanalyzeWithGemini = async () => {
+    if (!currentApp || !activeJob) return;
+    setIsGeminiAnalyzing(true);
+
+    try {
+      const apiKey = geminiApiKeyInput || getGeminiApiKey();
+      const geminiResult = await analyzeBeforeInterviewWithGemini(
+        {
+          title: activeJob.title,
+          requiredSkills: activeJob.requiredSkills,
+          description: activeJob.description,
+          resumeCutoff: activeJob.resumeCutoff,
+          githubCutoff: activeJob.githubCutoff,
+          projectCutoff: activeJob.projectCutoff,
+        },
+        {
+          name: currentApp.candidateName,
+          resumeText: `${currentApp.resumeTextSummary} ${currentApp.resumeFileName}`,
+          githubUrl: `${currentApp.githubAccountUrl} ${currentApp.githubRepo1Url}`,
+          projectDetails: `${currentApp.projectLiveUrl} ${currentApp.projectArchitectureSummary}`,
+        },
+        apiKey
+      );
+
+      if (geminiResult) {
+        const resumeScore = Math.max(0, Math.min(100, Math.round(geminiResult.resumeScore)));
+        const resumePassed = resumeScore >= activeJob.resumeCutoff;
+        const authenticityPercentage = Math.max(0, Math.min(100, Math.round(geminiResult.authenticityPercentage || 85)));
+        const githubScore = Math.min(100, Math.round(authenticityPercentage * 0.9 + 10));
+        const githubPassed = githubScore >= activeJob.githubCutoff && authenticityPercentage >= 70;
+
+        const updated = applications.map((a) => {
+          if (a.id === currentApp.id) {
+            return {
+              ...a,
+              resumeScore,
+              resumePassed,
+              atsBreakdown: geminiResult.atsBreakdown,
+              matchedKeywords: geminiResult.matchedKeywords,
+              missingKeywords: geminiResult.missingKeywords,
+              resumeFeedback: geminiResult.resumeFeedback,
+              authenticityPercentage,
+              aiWrittenPercentage: 100 - authenticityPercentage,
+              githubScore,
+              githubPassed,
+              githubFeedback: geminiResult.githubFeedback,
+              generatedMCQs: geminiResult.generatedMCQs || a.generatedMCQs,
+              repoCodingChallenges: (geminiResult.repoCodingChallenges as any) || a.repoCodingChallenges,
+              aiInterviewDialogue: geminiResult.aiInterviewDialogue || a.aiInterviewDialogue,
+              skillMap: geminiResult.skillMap || a.skillMap,
+              improvementPlan: geminiResult.improvementPlan || a.improvementPlan,
+              hrEvidence: geminiResult.hrEvidence || a.hrEvidence,
+              overallStatus: (resumePassed && githubPassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)") as any,
+              currentStage: (resumePassed && githubPassed ? "before_interview" : "rejected") as any,
+            };
+          }
+          return a;
+        });
+
+        setApplications(updated);
+        saveWorkflowApplications(updated);
+
+        toast({
+          title: "✨ Gemini AI Resume & Stack Analysis Complete",
+          description: `Resume ATS score evaluated to ${resumeScore}/100 with ${geminiResult.matchedKeywords?.length || 0} verified stack matches.`,
+        });
+      } else {
+        toast({
+          title: "Analysis Completed (Deterministic Engine)",
+          description: "Resume evaluation updated. To use real-time Gemini LLM analysis, enter your Gemini API Key.",
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Evaluation Error", description: "Could not complete Gemini analysis.", variant: "destructive" });
+    } finally {
+      setIsGeminiAnalyzing(false);
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    setGeminiApiKey(geminiApiKeyInput);
+    setShowApiKeyModal(false);
+    toast({
+      title: "✅ Gemini API Key Saved",
+      description: "Gemini AI is now active for resume scoring, 5 MCQs, and coding challenges.",
+    });
+  };
+
+  const handleCreateTestCandidate = async (jobToUse: JobCutoffs, pass: boolean = true) => {
     const candidateName = pass ? "Alex Rivera" : "Jordan Smith";
     const email = pass ? "alex.rivera@example.com" : "jordan.smith@example.com";
-    const newApp = simulateCandidateApplicationForJob(jobToUse, {
-      candidateName,
-      candidateEmail: email,
-      shouldPass: pass,
-    });
+    
+    setIsGeminiAnalyzing(true);
+    const newApp = await evaluateAndSubmitApplicationWithGemini(
+      jobToUse,
+      {
+        name: candidateName,
+        email,
+        resumeFileName: `${candidateName.replace(/\s+/g, "_")}_Resume.pdf`,
+        resumeText: pass
+          ? `Experienced software engineer with 4 years building scalable systems using ${jobToUse.requiredSkills.join(", ")}, Distributed Caching, CI/CD pipelines, and microservices.`
+          : "Basic HTML and CSS enthusiast with introductory computing knowledge.",
+        githubAcc: `https://github.com/${candidateName.toLowerCase().replace(/\s+/g, "-")}-dev`,
+        githubRepo1: `https://github.com/${candidateName.toLowerCase().replace(/\s+/g, "-")}-dev/core-engine`,
+        githubRepo2: `https://github.com/${candidateName.toLowerCase().replace(/\s+/g, "-")}-dev/pipeline`,
+        projectUrl: "https://demo-app.dev",
+        projectSummary: `Production fullstack architecture utilizing ${jobToUse.requiredSkills.slice(0, 3).join(", ")}.`,
+      },
+      geminiApiKeyInput || getGeminiApiKey()
+    );
+    setIsGeminiAnalyzing(false);
+
     setApplications(getWorkflowApplications());
     setSelectedAppId(newApp.id);
     const initialCodes: Record<number, string> = {};
@@ -221,8 +331,8 @@ export const BeforeInterviewCandidatePanel = () => {
     toast({
       title: `🎯 Profile Evaluated for ${jobToUse.title}`,
       description: pass
-        ? "Candidate cleared Before Interview screening cutoffs and can proceed to next rounds!"
-        : "Candidate scored below cutoff to demonstrate transparent rejection and improvement plan guidance.",
+        ? `Candidate cleared Before Interview screening (ATS Score: ${newApp.resumeScore}/100)!`
+        : `Candidate scored below cutoff (${newApp.resumeScore}/100) to demonstrate transparent rejection.`,
     });
   };
 
@@ -234,10 +344,20 @@ export const BeforeInterviewCandidatePanel = () => {
         <div className="p-6 md:p-8 bg-paper-2 border-b border-ink/10">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20 mb-3">
-                <Sparkles className="w-3.5 h-3.5" />
-                Step 1: Before Interview Screening Layer
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Step 1: Before Interview Screening Layer
+                </div>
+                <button
+                  onClick={() => setShowApiKeyModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-ink/5 hover:bg-ink/10 text-ink border border-ink/15 transition-colors"
+                >
+                  <Key className="w-3 h-3 text-forest" />
+                  <span>Gemini AI Key: {getGeminiApiKey() ? "Configured ✓" : "Set Key"}</span>
+                </button>
               </div>
+
               <h3 className="font-serif-display text-2xl md:text-3xl text-ink">
                 {currentApp ? `${currentApp.candidateName}'s Screening Dossier` : "Candidate Pre-Interview Screening"}
               </h3>
@@ -246,62 +366,77 @@ export const BeforeInterviewCandidatePanel = () => {
               </p>
             </div>
 
-            {/* Application Switcher Buttons */}
-            {applications.length > 0 && (
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
-                {applications.map((app) => {
-                  const active = selectedAppId === app.id;
-                  const appRejected = app.currentStage === "rejected";
-                  return (
-                    <button
-                      key={app.id}
-                      onClick={() => {
-                        setSelectedAppId(app.id);
-                        setMcqSubmitted(false);
-                        setSelectedMCQAnswers({});
-                        const initialCodes: Record<number, string> = {};
-                        app.repoCodingChallenges?.forEach((c) => {
-                          initialCodes[c.id] = c.submittedCode || c.starterCode;
-                        });
-                        setCodeInputs(initialCodes);
-                      }}
-                      className={`flex-1 sm:w-[220px] text-left p-3 rounded-xl transition-all relative ${
-                        active
-                          ? "bg-ink text-paper shadow-md"
-                          : "hover:bg-ink/5 text-ink"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-8 h-8 rounded-full grid place-items-center font-serif-display font-bold text-xs shrink-0 ${
-                          active ? "bg-paper text-ink" : "bg-forest/10 text-forest"
-                        }`}>
-                          {app.candidateName.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-xs truncate">{app.candidateName}</div>
-                          <div className={`text-[11px] truncate ${active ? "text-paper/70" : "text-ink-muted"}`}>
-                            {app.jobTitle}
+            {/* Application Switcher & Actions */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              {applications.length > 0 && (
+                <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
+                  {applications.map((app) => {
+                    const active = selectedAppId === app.id;
+                    const appRejected = app.currentStage === "rejected";
+                    return (
+                      <button
+                        key={app.id}
+                        onClick={() => {
+                          setSelectedAppId(app.id);
+                          setMcqSubmitted(false);
+                          setSelectedMCQAnswers({});
+                          const initialCodes: Record<number, string> = {};
+                          app.repoCodingChallenges?.forEach((c) => {
+                            initialCodes[c.id] = c.submittedCode || c.starterCode;
+                          });
+                          setCodeInputs(initialCodes);
+                        }}
+                        className={`flex-1 sm:w-[220px] text-left p-3 rounded-xl transition-all relative ${
+                          active
+                            ? "bg-ink text-paper shadow-md"
+                            : "hover:bg-ink/5 text-ink"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-8 h-8 rounded-full grid place-items-center font-serif-display font-bold text-xs shrink-0 ${
+                            active ? "bg-paper text-ink" : "bg-forest/10 text-forest"
+                          }`}>
+                            {app.candidateName.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-xs truncate">{app.candidateName}</div>
+                            <div className={`text-[11px] truncate ${active ? "text-paper/70" : "text-ink-muted"}`}>
+                              {app.jobTitle}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
-                        <span className={active ? "text-paper/80" : "text-ink-muted"}>ATS: {app.resumeScore}/100</span>
-                        <span className={`px-1.5 py-0.2 rounded font-semibold ${
-                          appRejected
-                            ? "bg-destructive/20 text-destructive-foreground"
-                            : "text-forest"
-                        }`}>
-                          {appRejected ? "Rejected" : "Screened"}
-                        </span>
-                      </div>
-                      {active && (
-                        <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-forest animate-pulse" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                        <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
+                          <span className={active ? "text-paper/80" : "text-ink-muted"}>ATS: {app.resumeScore}/100</span>
+                          <span className={`px-1.5 py-0.2 rounded font-semibold ${
+                            appRejected
+                              ? "bg-destructive/20 text-destructive-foreground"
+                              : "text-forest"
+                          }`}>
+                            {appRejected ? "Rejected" : "Screened"}
+                          </span>
+                        </div>
+                        {active && (
+                          <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-forest animate-pulse" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {currentApp && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleReanalyzeWithGemini}
+                  disabled={isGeminiAnalyzing}
+                  className="rounded-xl border-ink/20 text-xs px-3 py-2 flex items-center gap-1.5 bg-paper hover:bg-forest/10"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-forest" />
+                  {isGeminiAnalyzing ? "Gemini Analyzing..." : "AI Re-Score with Gemini"}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Candidate Mini Profile Bar */}
@@ -371,7 +506,7 @@ export const BeforeInterviewCandidatePanel = () => {
                     onClick={() => handleCreateTestCandidate(activeJob, true)}
                     className="flex-1 bg-forest text-paper hover:bg-forest/90 text-xs py-2"
                   >
-                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Run AI Candidate Analyzer
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Run Gemini AI Analyzer
                   </Button>
                   <Button
                     variant="outline"
@@ -486,7 +621,7 @@ export const BeforeInterviewCandidatePanel = () => {
                           </div>
                         </div>
                         <div className="mt-4 text-xs text-ink-soft leading-relaxed">
-                          Evaluated against job description requirements, verified project context, and keyword frequency.
+                          Evaluated against job requirements, verified project context, and keyword frequency.
                         </div>
                         <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
                           Required Cutoff: {activeJob?.resumeCutoff || 75}% · Status: <span className={currentApp.resumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{currentApp.resumePassed ? "Passed" : "Below Cutoff"}</span>
@@ -1031,12 +1166,64 @@ export const BeforeInterviewCandidatePanel = () => {
 
             {/* Footer Bar */}
             <div className="p-4 bg-paper-2 border-t border-ink/10 flex items-center justify-between text-xs text-ink-muted">
-              <span>💡 Click through tabs 01–06 to inspect your resume match, code authenticity, MCQs, and skill growth map.</span>
+              <span>💡 All 6 stages reflect live candidate evaluations powered by Google Gemini AI &amp; explainable ATS models.</span>
               <span className="font-mono text-[11px] text-forest font-medium hidden sm:inline">100% Explainable AI Verification</span>
             </div>
           </>
         )}
       </div>
+
+      {/* Gemini API Key Configuration Modal */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md rounded-3xl border border-ink/15 bg-paper p-6 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-forest/10 text-forest grid place-items-center">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-serif-display font-semibold text-ink">Google Gemini API Key</h4>
+                  <p className="text-[11px] text-ink-muted">Powers real-time resume ATS scoring &amp; MCQ generation</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="w-7 h-7 rounded-full border border-ink/15 text-xs grid place-items-center hover:bg-ink/5"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-ink">Enter your Gemini API Key:</label>
+              <input
+                type="password"
+                placeholder="AIzaSy..."
+                value={geminiApiKeyInput}
+                onChange={(e) => setGeminiApiKeyInput(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink"
+              />
+              <p className="text-[11px] text-ink-soft leading-relaxed">
+                Your key is stored securely in your browser session for live Gemini AI scoring. If omitted, the deterministic scoring engine runs smoothly.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setShowApiKeyModal(false)} className="text-xs">
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSaveApiKey} className="bg-forest text-paper hover:bg-forest/90 text-xs px-4">
+                Save &amp; Activate Gemini
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

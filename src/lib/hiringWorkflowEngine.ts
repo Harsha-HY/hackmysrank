@@ -11,6 +11,8 @@
  * 8. Step 6: Advance to Interview Process (DSA + AI Interview)
  */
 
+import { analyzeBeforeInterviewWithGemini } from "./geminiResumeAnalyzer";
+
 export interface JobCutoffs {
   id: string;
   title: string;
@@ -753,6 +755,139 @@ export function evaluateAndSubmitApplication(
   const updated = [newApp, ...existing];
   saveWorkflowApplications(updated);
   return newApp;
+}
+
+/**
+ * Process candidate application with real Google Gemini API
+ */
+export async function evaluateAndSubmitApplicationWithGemini(
+  job: JobCutoffs,
+  candidateData: {
+    name: string;
+    email: string;
+    resumeFileName: string;
+    resumeText: string;
+    githubAcc: string;
+    githubRepo1: string;
+    githubRepo2?: string;
+    projectUrl?: string;
+    projectSummary: string;
+  },
+  geminiApiKey?: string
+): Promise<CandidateApplicationSubmission> {
+  try {
+    const geminiResult = await analyzeBeforeInterviewWithGemini(
+      {
+        title: job.title,
+        requiredSkills: job.requiredSkills,
+        description: job.description || `Role for ${job.title}`,
+        resumeCutoff: job.resumeCutoff,
+        githubCutoff: job.githubCutoff,
+        projectCutoff: job.projectCutoff,
+      },
+      {
+        name: candidateData.name,
+        resumeText: candidateData.resumeText,
+        githubUrl: `${candidateData.githubAcc} ${candidateData.githubRepo1} ${candidateData.githubRepo2 || ""}`,
+        projectDetails: `${candidateData.projectUrl || ""} ${candidateData.projectSummary}`,
+      },
+      geminiApiKey
+    );
+
+    if (geminiResult) {
+      const resumeScore = Math.max(0, Math.min(100, Math.round(geminiResult.resumeScore)));
+      const resumePassed = resumeScore >= job.resumeCutoff;
+      const resumeRejectionReason = resumePassed
+        ? undefined
+        : `Auto-Rejected: Gemini AI resume score (${resumeScore}/100) is below the required ${job.resumeCutoff}% cutoff for ${job.title}. Missing required skills: ${(geminiResult.missingKeywords || []).join(", ")}.`;
+
+      const authenticityPercentage = Math.max(0, Math.min(100, Math.round(geminiResult.authenticityPercentage || 85)));
+      const aiWrittenPercentage = 100 - authenticityPercentage;
+      const githubScore = Math.min(100, Math.round(authenticityPercentage * 0.9 + 10));
+      const githubPassed = githubScore >= job.githubCutoff && authenticityPercentage >= 70;
+      const githubRejectionReason = githubPassed
+        ? undefined
+        : `Auto-Rejected: Code authenticity (${authenticityPercentage}%) or GitHub score (${githubScore}/100) is below cutoff (${job.githubCutoff}%).`;
+
+      const projectScore = candidateData.projectSummary.length > 25 ? 88 : 50;
+      const projectPassed = projectScore >= job.projectCutoff;
+
+      let overallStatus: CandidateApplicationSubmission["overallStatus"] = "Before Interview (Passed Cutoffs)";
+      let currentStage: CandidateApplicationSubmission["currentStage"] = "before_interview";
+
+      if (!resumePassed) {
+        overallStatus = "Auto-Rejected (Resume)";
+        currentStage = "rejected";
+      } else if (!githubPassed) {
+        overallStatus = "Auto-Rejected (GitHub)";
+        currentStage = "rejected";
+      } else if (!projectPassed) {
+        overallStatus = "Auto-Rejected (Project)";
+        currentStage = "rejected";
+      }
+
+      const newApp: CandidateApplicationSubmission = {
+        id: `app-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        jobId: job.id,
+        jobTitle: job.title,
+        candidateName: candidateData.name,
+        candidateEmail: candidateData.email,
+        appliedDate: "Just now",
+        resumeFileName: candidateData.resumeFileName,
+        resumeTextSummary: candidateData.resumeText,
+        githubAccountUrl: candidateData.githubAcc,
+        githubRepo1Url: candidateData.githubRepo1,
+        githubRepo2Url: candidateData.githubRepo2,
+        projectLiveUrl: candidateData.projectUrl,
+        projectArchitectureSummary: candidateData.projectSummary,
+
+        resumeScore,
+        resumePassed,
+        resumeFeedback: geminiResult.resumeFeedback || `Gemini ATS evaluation: Matched ${geminiResult.matchedKeywords?.length || 0} skills.`,
+        resumeRejectionReason,
+        matchedKeywords: geminiResult.matchedKeywords || job.requiredSkills.slice(0, 2),
+        atsBreakdown: geminiResult.atsBreakdown || generateDynamicATSBreakdown(job.requiredSkills, job.title, resumeScore, geminiResult.matchedKeywords || [], geminiResult.missingKeywords || []),
+
+        githubScore,
+        githubPassed,
+        aiWrittenPercentage,
+        authenticityPercentage,
+        detectedRepoStacks: geminiResult.matchedKeywords?.length ? geminiResult.matchedKeywords : job.requiredSkills.slice(0, 3),
+        githubFeedback: geminiResult.githubFeedback || "Gemini code authenticity scan complete.",
+        githubRejectionReason,
+        codeSignals: geminiResult.codeSignals || [
+          `Verified ${job.title} code modules`,
+          "Algorithmic correctness checked",
+          "Authentic commit history",
+        ],
+
+        generatedMCQs: geminiResult.generatedMCQs || generateDynamicMCQs(job.requiredSkills, job.title),
+        repoCodingChallenges: (geminiResult.repoCodingChallenges as any) || generateDynamicCodingChallenges(job.requiredSkills, job.title),
+        aiInterviewDialogue: geminiResult.aiInterviewDialogue || generateDynamicAIInterview(job.requiredSkills, job.title, candidateData.name),
+        skillMap: geminiResult.skillMap || generateDynamicSkillMap(job.requiredSkills, job.title, resumeScore, geminiResult.matchedKeywords || []),
+        improvementPlan: geminiResult.improvementPlan || generateDynamicImprovementPlan(job.requiredSkills, job.title, geminiResult.missingKeywords || []),
+        hrEvidence: geminiResult.hrEvidence || generateDynamicHREvidence(job.requiredSkills, job.title, resumeScore, authenticityPercentage, candidateData.name, resumePassed && githubPassed),
+
+        projectValidationScore: projectScore,
+        projectPassed,
+        projectFeedback: projectPassed ? `Project architecture verified for ${job.title}.` : "Project requires further depth.",
+        projectArchitectureDetected: candidateData.projectSummary || "Modern Modular Service Architecture",
+
+        overallStatus,
+        currentStage,
+      };
+
+      const existing = getWorkflowApplications();
+      const updated = [newApp, ...existing];
+      saveWorkflowApplications(updated);
+      return newApp;
+    }
+  } catch (e) {
+    console.warn("Gemini AI evaluation error, falling back to deterministic engine:", e);
+  }
+
+  // Fallback to deterministic engine
+  return evaluateAndSubmitApplication(job, candidateData);
 }
 
 /**

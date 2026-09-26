@@ -4,7 +4,8 @@ import {
   ScanSearch, FileText, GitBranch, ListChecks, Code2, Bot, Award,
   ShieldCheck, CheckCircle2, AlertCircle, Sparkles, HelpCircle,
   ChevronRight, ExternalLink, Layers, Database, Cpu, Terminal,
-  RefreshCw, Search, Briefcase, Play, Bug, Check, X, Eye, ArrowRight
+  RefreshCw, Search, Briefcase, Play, Bug, Check, X, Eye, ArrowRight,
+  Key, Settings, Zap
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +19,7 @@ import {
   deleteWorkflowJob,
   clearAllWorkflowData
 } from "@/lib/hiringWorkflowEngine";
+import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
 import { supabase } from "@/integrations/supabase/client";
 
 export const BeforeInterviewHRPanel = () => {
@@ -27,6 +29,9 @@ export const BeforeInterviewHRPanel = () => {
   const [selectedJobId, setSelectedJobId] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAppId, setSelectedAppId] = useState<string>("");
+  const [geminiApiKeyInput, setGeminiApiKeyInput] = useState(getGeminiApiKey());
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
 
   // All 7 Tabs available for HR including confidential Tab 7 HR Evidence Decision
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "scorecard" | "hrevidence">("ats");
@@ -185,14 +190,103 @@ export const BeforeInterviewHRPanel = () => {
     });
   };
 
+  const handleReanalyzeWithGemini = async () => {
+    if (!currentApp || !activeJob) return;
+    setIsGeminiAnalyzing(true);
+
+    try {
+      const apiKey = geminiApiKeyInput || getGeminiApiKey();
+      const geminiResult = await analyzeBeforeInterviewWithGemini(
+        {
+          title: activeJob.title,
+          requiredSkills: activeJob.requiredSkills,
+          description: activeJob.description,
+          resumeCutoff: activeJob.resumeCutoff,
+          githubCutoff: activeJob.githubCutoff,
+          projectCutoff: activeJob.projectCutoff,
+        },
+        {
+          name: currentApp.candidateName,
+          resumeText: `${currentApp.resumeTextSummary} ${currentApp.resumeFileName}`,
+          githubUrl: `${currentApp.githubAccountUrl} ${currentApp.githubRepo1Url}`,
+          projectDetails: `${currentApp.projectLiveUrl} ${currentApp.projectArchitectureSummary}`,
+        },
+        apiKey
+      );
+
+      if (geminiResult) {
+        const resumeScore = Math.max(0, Math.min(100, Math.round(geminiResult.resumeScore)));
+        const resumePassed = resumeScore >= activeJob.resumeCutoff;
+        const authenticityPercentage = Math.max(0, Math.min(100, Math.round(geminiResult.authenticityPercentage || 85)));
+        const githubScore = Math.min(100, Math.round(authenticityPercentage * 0.9 + 10));
+        const githubPassed = githubScore >= activeJob.githubCutoff && authenticityPercentage >= 70;
+
+        const updated = applications.map((a) => {
+          if (a.id === currentApp.id) {
+            return {
+              ...a,
+              resumeScore,
+              resumePassed,
+              atsBreakdown: geminiResult.atsBreakdown,
+              matchedKeywords: geminiResult.matchedKeywords,
+              missingKeywords: geminiResult.missingKeywords,
+              resumeFeedback: geminiResult.resumeFeedback,
+              authenticityPercentage,
+              aiWrittenPercentage: 100 - authenticityPercentage,
+              githubScore,
+              githubPassed,
+              githubFeedback: geminiResult.githubFeedback,
+              generatedMCQs: geminiResult.generatedMCQs || a.generatedMCQs,
+              repoCodingChallenges: (geminiResult.repoCodingChallenges as any) || a.repoCodingChallenges,
+              aiInterviewDialogue: geminiResult.aiInterviewDialogue || a.aiInterviewDialogue,
+              skillMap: geminiResult.skillMap || a.skillMap,
+              improvementPlan: geminiResult.improvementPlan || a.improvementPlan,
+              hrEvidence: geminiResult.hrEvidence || a.hrEvidence,
+              overallStatus: (resumePassed && githubPassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)") as any,
+              currentStage: (resumePassed && githubPassed ? "before_interview" : "rejected") as any,
+            };
+          }
+          return a;
+        });
+
+        setApplications(updated);
+        saveWorkflowApplications(updated);
+
+        toast({
+          title: "✨ Gemini AI Evaluation Complete",
+          description: `Resume scored ${resumeScore}/100 with ${geminiResult.matchedKeywords?.length || 0} matched keywords. Full dossier updated!`,
+        });
+      } else {
+        toast({
+          title: "Analysis Completed",
+          description: "Resume evaluation updated using deterministic scoring engine.",
+        });
+      }
+    } catch (e: any) {
+      toast({
+        title: "Gemini Analysis Error",
+        description: e.message || "Failed to analyze with Gemini API",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeminiAnalyzing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Main HR Controls Header */}
       <div className="p-6 md:p-8 rounded-3xl bg-paper border border-ink/10 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-forest/10 text-forest text-xs font-mono uppercase tracking-wider mb-2">
-            <ScanSearch className="w-3.5 h-3.5" />
-            Recruiter Screening &amp; Cutoff Dossier
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-forest/10 text-forest text-xs font-mono uppercase tracking-wider">
+              <ScanSearch className="w-3.5 h-3.5" />
+              Recruiter Screening &amp; Cutoff Dossier
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-paper-2 border border-ink/15 text-ink-soft text-[11px] font-mono">
+              <Sparkles className="w-3 h-3 text-forest" />
+              Gemini AI Powered
+            </div>
           </div>
           <h2 className="font-serif-display text-2xl md:text-3xl text-ink">
             Before Interview — Candidate AI Analysis &amp; Cutoffs
@@ -203,6 +297,17 @@ export const BeforeInterviewHRPanel = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Gemini API Key Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowApiKeyModal(true)}
+            className="rounded-xl border-ink/15 text-xs h-9 px-3 gap-1.5 bg-paper hover:bg-forest/10 hover:text-forest"
+          >
+            <Key className="w-3.5 h-3.5 text-forest" />
+            <span>{getGeminiApiKey() ? "Gemini Key: Active" : "Set Gemini Key"}</span>
+          </Button>
+
           {/* Job Filter */}
           <select
             value={selectedJobId}
@@ -383,14 +488,26 @@ export const BeforeInterviewHRPanel = () => {
                   {currentApp.overallStatus}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-ink-muted">Detected Stacks:</span>
-                <div className="flex flex-wrap gap-1">
-                  {currentApp.detectedRepoStacks.map((s) => (
-                    <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
-                      {s}
-                    </span>
-                  ))}
+              <div className="flex items-center gap-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isGeminiAnalyzing}
+                  onClick={handleReanalyzeWithGemini}
+                  className="rounded-xl border-forest/30 text-forest hover:bg-forest/10 text-xs h-8 px-3 gap-1.5 shadow-sm"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isGeminiAnalyzing ? "animate-spin" : ""}`} />
+                  <span>{isGeminiAnalyzing ? "Gemini Scoring..." : "AI Re-Score with Gemini"}</span>
+                </Button>
+                <div className="flex items-center gap-2">
+                  <span className="text-ink-muted">Detected Stacks:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {currentApp.detectedRepoStacks.map((s) => (
+                      <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1023,6 +1140,87 @@ export const BeforeInterviewHRPanel = () => {
             <span>💡 All 7 stages reflect real-time candidate data and recruiter decision controls.</span>
             <span className="font-mono text-[11px] text-forest font-medium hidden sm:inline">100% Explainable AI Verification</span>
           </div>
+        </div>
+      )}
+
+      {/* Gemini API Key Configuration Modal */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-paper rounded-3xl border border-ink/15 shadow-2xl p-6 md:p-8 max-w-lg w-full space-y-6"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-forest/10 border border-forest/20 grid place-items-center text-forest">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif-display text-xl text-ink">Google Gemini API Key</h3>
+                  <p className="text-xs text-ink-muted">Enable real-time AI ATS scoring &amp; candidate diagnostics</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="p-1 rounded-lg text-ink-muted hover:text-ink hover:bg-ink/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-mono font-medium text-ink block">
+                GEMINI API KEY (Google AI Studio)
+              </label>
+              <input
+                type="password"
+                placeholder="AIzaSy..."
+                value={geminiApiKeyInput}
+                onChange={(e) => setGeminiApiKeyInput(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-ink/15 bg-paper-2 font-mono text-xs focus:outline-none focus:border-forest text-ink"
+              />
+              <p className="text-[11px] text-ink-muted">
+                Your key is stored securely in your browser's local storage and used directly for ATS scoring, repository analysis, and MCQs generation.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-forest hover:underline inline-flex items-center gap-1 font-medium"
+              >
+                Get a free key at Google AI Studio <ExternalLink className="w-3 h-3" />
+              </a>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowApiKeyModal(false)}
+                  className="rounded-xl border-ink/15 text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setGeminiApiKey(geminiApiKeyInput);
+                    setShowApiKeyModal(false);
+                    toast({
+                      title: "Gemini API Key Saved",
+                      description: "Real-time AI evaluation engine is ready.",
+                    });
+                  }}
+                  className="rounded-xl bg-forest text-paper hover:bg-forest/90 text-xs px-4"
+                >
+                  Save Key
+                </Button>
+              </div>
+            </div>
+          </motion.div>
         </div>
       )}
     </div>

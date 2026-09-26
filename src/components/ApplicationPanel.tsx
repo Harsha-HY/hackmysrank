@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, FileText, Image, CheckCircle2 } from "lucide-react";
 import {
   evaluateAndSubmitApplication,
+  evaluateAndSubmitApplicationWithGemini,
   getWorkflowJobs,
   addWorkflowJob,
   JobCutoffs
@@ -314,8 +315,8 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       addWorkflowJob(workflowJob);
     }
 
-    // Evaluate application against real cutoffs, generating 5 MCQs and 2 Repo Coding Challenges
-    const evaluatedApp = evaluateAndSubmitApplication(workflowJob, {
+    // Evaluate application against real cutoffs with Gemini AI, generating 5 MCQs and 2 Repo Coding Challenges
+    const evaluatedApp = await evaluateAndSubmitApplicationWithGemini(workflowJob, {
       name: userData.full_name || "Applicant",
       email: session.user.email || "",
       resumeFileName: resumeFile ? resumeFile.name : (useBuilt ? "HireZap_Built_Resume.pdf" : "Resume.pdf"),
