@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Briefcase, MapPin, DollarSign, Clock, Zap, X, Target, FileText, Upload, CheckCircle, FileStack, Save } from "lucide-react";
+import { Briefcase, MapPin, DollarSign, Clock, Zap, X, Target, FileText, Upload, CheckCircle, FileStack, Save, GitBranch, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,6 +11,7 @@ import PdfQuestionsModal, { ExtractedQuestion } from "./PdfQuestionsModal";
 import { normalizePipeline, defaultPipeline, PipelineStage } from "@/lib/pipeline";
 import { Workflow } from "lucide-react";
 import { Loader2 } from "@/components/BrandLoader";
+import { addWorkflowJob } from "@/lib/hiringWorkflowEngine";
 
 export interface JobTemplateRow {
   id: string;
@@ -60,7 +61,9 @@ const emptyForm = {
   skills: [] as string[],
   description: "",
   aptitudeCutoff: 60,
-  resumeCutoff: 50,
+  resumeCutoff: 75,
+  githubCutoff: 70,
+  projectCutoff: 65,
 };
 
 const AddJobPanel = ({ open, onOpenChange, companyId, hrUserId, managers, onJobCreated, editTemplate = null, templateOnlyMode = false, onTemplateSaved }: AddJobPanelProps) => {
@@ -103,7 +106,9 @@ const AddJobPanel = ({ open, onOpenChange, companyId, hrUserId, managers, onJobC
       skills: t.skills_required || [],
       description: t.job_description || "",
       aptitudeCutoff: t.aptitude_cutoff_score ?? 60,
-      resumeCutoff: (t as any).resume_cutoff_score ?? 50,
+      resumeCutoff: (t as any).resume_cutoff_score ?? 75,
+      githubCutoff: (t as any).github_cutoff_score ?? 70,
+      projectCutoff: (t as any).project_cutoff_score ?? 65,
     });
   };
 
@@ -377,6 +382,19 @@ const AddJobPanel = ({ open, onOpenChange, companyId, hrUserId, managers, onJobC
     if (insertedJob?.id) {
       import("@/lib/embeddings").then((m) => m.refreshEmbedding("job", insertedJob.id));
     }
+
+    // Save job into Before-Interview Cutoffs Workflow Engine
+    addWorkflowJob({
+      id: insertedJob?.id || `job-${Date.now()}`,
+      title: form.title,
+      department: form.department || "Engineering",
+      requiredSkills: form.skills.length > 0 ? form.skills : ["Software Engineering", "Algorithms"],
+      resumeCutoff: form.resumeCutoff,
+      githubCutoff: form.githubCutoff,
+      projectCutoff: form.projectCutoff,
+      description: form.description || "",
+      createdDate: new Date().toLocaleDateString(),
+    });
 
     // Save as template if requested
     let savedTemplate = false;
@@ -754,11 +772,11 @@ const AddJobPanel = ({ open, onOpenChange, companyId, hrUserId, managers, onJobC
             onReupload={handlePreviewReupload}
           />
 
-          {/* Resume Cutoff */}
+          {/* 1. Resume Match Cutoff */}
           <div className="rounded-lg border border-border bg-secondary/30 p-4">
             <div className="flex items-center gap-2 mb-3">
               <Target className="h-4 w-4 text-primary" />
-              <label className="text-sm font-medium text-foreground">Resume Match Cutoff Score</label>
+              <label className="text-sm font-medium text-foreground">1. Resume Match Cutoff Score</label>
               <span className="ml-auto text-lg font-bold text-primary">{form.resumeCutoff}%</span>
             </div>
             <Slider
@@ -775,7 +793,57 @@ const AddJobPanel = ({ open, onOpenChange, companyId, hrUserId, managers, onJobC
               <span>100%</span>
             </div>
             <p className="text-[11px] text-muted-foreground mt-2">
-              Applications with AI resume score &lt; {form.resumeCutoff}% will be auto-rejected (won't reach Aptitude).
+              Applications with AI resume score &lt; {form.resumeCutoff}% will be auto-rejected with an automated detailed explanation.
+            </p>
+          </div>
+
+          {/* 2. GitHub Code Quality & Authenticity Cutoff */}
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <GitBranch className="h-4 w-4 text-primary" />
+              <label className="text-sm font-medium text-foreground">2. GitHub Code Authenticity Cutoff</label>
+              <span className="ml-auto text-lg font-bold text-primary">{form.githubCutoff}%</span>
+            </div>
+            <Slider
+              value={[form.githubCutoff]}
+              onValueChange={(val) => setForm((p) => ({ ...p, githubCutoff: val[0] }))}
+              min={0}
+              max={100}
+              step={5}
+              className="mb-2"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              Requires ≥ {form.githubCutoff}% authentic human code (screens out heavy AI boilerplate repositories).
+            </p>
+          </div>
+
+          {/* 3. Project Architecture Validation Cutoff */}
+          <div className="rounded-lg border border-border bg-secondary/30 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Layers className="h-4 w-4 text-primary" />
+              <label className="text-sm font-medium text-foreground">3. Project Validation Cutoff Score</label>
+              <span className="ml-auto text-lg font-bold text-primary">{form.projectCutoff}%</span>
+            </div>
+            <Slider
+              value={[form.projectCutoff]}
+              onValueChange={(val) => setForm((p) => ({ ...p, projectCutoff: val[0] }))}
+              min={0}
+              max={100}
+              step={5}
+              className="mb-2"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              Live deployment and architectural complexity must score ≥ {form.projectCutoff}% to proceed to interviews.
             </p>
           </div>
 

@@ -6,7 +6,7 @@ import {
   Zap, LayoutDashboard, Briefcase, MessageSquare, Settings,
   User, LogOut, CheckCircle2, Clock, Lock, FileText,
   Upload, Video, ExternalLink, Search, Camera, Key, Sparkles, BarChart3,
-  Archive, ChevronRight, XCircle, Trophy, CalendarDays
+  Archive, ChevronRight, XCircle, Trophy, CalendarDays, ScanSearch
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -22,6 +22,7 @@ import JourneyDrawer from "@/components/candidate/JourneyDrawer";
 import ApplicationDetailView from "@/components/candidate/ApplicationDetailView";
 import NotificationsBell from "@/components/candidate/NotificationsBell";
 import AIAssistant from "@/components/candidate/AIAssistant";
+import BeforeInterviewCandidatePanel from "@/components/candidate/BeforeInterviewCandidatePanel";
 import ThemeToggle from "@/components/ThemeToggle";
 import BrandLogo from "@/components/BrandLogo";
 import { Loader2 } from "@/components/BrandLoader";
@@ -303,7 +304,22 @@ const CandidateDashboard = () => {
     setOnboardingSubmitting(false);
   };
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+
+    // Check URL parameters for tab navigation
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get("tab");
+    if (tabParam === "before_interview" || tabParam === "before-interview") {
+      setActiveTab("before-interview");
+    }
+
+    const handleSwitchTab = (e: any) => {
+      if (e.detail) setActiveTab(e.detail);
+    };
+    window.addEventListener("hz_switch_candidate_tab", handleSwitchTab);
+    return () => window.removeEventListener("hz_switch_candidate_tab", handleSwitchTab);
+  }, [fetchData]);
 
   // Real-time subscription for application stage changes
   useEffect(() => {
@@ -441,15 +457,14 @@ const CandidateDashboard = () => {
   const sidebarLinks = [
     { icon: LayoutDashboard, label: "Dashboard", key: "dashboard" },
     { icon: Briefcase, label: "My Applications", key: "applications", badge: activeApps.length || undefined },
+    { icon: ScanSearch, label: "Before Interview", key: "before-interview" },
     { icon: CalendarDays, label: "Interviews", key: "interviews", badge: ongoingInterviews.length || undefined },
     ...(offerLetter ? [{ icon: FileText, label: "Offer Letter", key: "offer", badge: offerLetter.status === "sent" ? 1 : undefined }] : []),
     { icon: Archive, label: "History", key: "history", badge: historyApps.length || undefined },
     { icon: Search, label: "Browse Jobs", key: "browse" },
     { icon: BarChart3, label: "My Analytics", key: "my-analytics" },
     { icon: FileText, label: "Resume Builder", key: "resume-builder" },
-    { icon: MessageSquare, label: "Messages", key: "messages", badge: unreadMessages || undefined },
     { icon: User, label: "Profile", key: "profile" },
-    { icon: Settings, label: "Settings", key: "settings" },
   ];
 
 
@@ -722,6 +737,28 @@ const CandidateDashboard = () => {
           </p>
         </div>
       </div>
+
+      {activeApps.some((a: any) => a.current_stage === "before_interview" || a.current_stage === "applied") && (
+        <div className="p-4 rounded-2xl bg-primary/10 border border-primary/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div>
+            <h5 className="text-sm font-bold text-foreground flex items-center gap-1.5">
+              <ScanSearch className="h-4 w-4 text-primary" />
+              ⚡ Stage 1: Before Interview Screening Active
+            </h5>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Complete your personalized 5 MCQs and 2 repo-derived coding challenges with AI error diagnostics to pass into technical interviews.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => setActiveTab("before-interview")}
+            className="shrink-0 bg-primary text-primary-foreground text-xs self-start sm:self-auto"
+          >
+            Open Before Interview Tab →
+          </Button>
+        </div>
+      )}
+
       {renderApplicationQueue(activeApps, "No active applications. Browse jobs to apply.")}
     </div>
   );
@@ -1044,26 +1081,14 @@ const CandidateDashboard = () => {
         );
       case "history":
         return renderHistory();
+      case "before-interview":
+        return <BeforeInterviewCandidatePanel />;
       case "interviews":
         return renderInterviewsTab();
       case "browse":
         return renderBrowseJobs();
-      case "messages":
-        return user ? (
-          <ChatSystem
-            currentUser={{ id: user.id, full_name: user.full_name, email: user.email, role: "candidate" }}
-            mode="candidate"
-          />
-        ) : null;
       case "profile":
         return renderProfile();
-      case "settings":
-        return (
-          <div className="rounded-2xl border border-border bg-card p-6">
-            <h4 className="text-lg font-bold text-foreground mb-2">Settings</h4>
-            <p className="text-sm text-muted-foreground">Notification preferences coming soon.</p>
-          </div>
-        );
       default:
         return renderDashboard();
     }
@@ -1147,8 +1172,8 @@ const CandidateDashboard = () => {
             <TabsList className="w-full overflow-x-auto">
               <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
               <TabsTrigger value="applications">Apps</TabsTrigger>
+              <TabsTrigger value="before-interview">Before Interview</TabsTrigger>
               <TabsTrigger value="browse">Jobs</TabsTrigger>
-              <TabsTrigger value="messages">Chat</TabsTrigger>
               <TabsTrigger value="profile">Profile</TabsTrigger>
             </TabsList>
           </Tabs>

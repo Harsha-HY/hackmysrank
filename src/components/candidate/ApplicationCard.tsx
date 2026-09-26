@@ -5,6 +5,7 @@ import { normalizePipeline, enabledStages, type PipelineStage } from "@/lib/pipe
 // Map an application.current_stage string onto a pipeline stage key
 const normalizeStageKey = (raw: string): string => {
   if (!raw) return "resume";
+  if (["before_interview", "before-interview"].includes(raw)) return "before_interview";
   if (["applied", "ai_scored", "shortlisted", "resume_review"].includes(raw)) return "resume";
   if (["aptitude_test", "test_completed"].includes(raw)) return "aptitude";
   if (["video_intro", "video_submitted"].includes(raw)) return "video_intro";

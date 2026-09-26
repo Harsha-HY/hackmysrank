@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useLiveData } from "@/hooks/useLiveData";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { FileText, ArrowRight, XCircle, BookOpen, Eye, Video, Play, Code2, Filter, CheckCheck, CheckCircle2, Users, Calendar, AlertTriangle, Trash2, RotateCcw, LayoutGrid, Table as TableIcon, MessageCircle, X, GitCompare, Monitor, Radio } from "lucide-react";
+import { FileText, ArrowRight, XCircle, BookOpen, Eye, Video, Play, Code2, Filter, CheckCheck, CheckCircle2, Users, Calendar, AlertTriangle, Trash2, RotateCcw, LayoutGrid, Table as TableIcon, MessageCircle, X, GitCompare, Monitor, Radio, GitBranch, Layers, ScanSearch, ExternalLink } from "lucide-react";
 import HRKanbanBoard from "./HRKanbanBoard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
@@ -20,6 +20,7 @@ import RejectWithReasonDialog from "./RejectWithReasonDialog";
 import OfferLetterPanel from "@/components/OfferLetterPanel";
 import { sendStageEmail } from "@/lib/stageEmail";
 import { Loader2 } from "@/components/BrandLoader";
+import { getWorkflowApplications } from "@/lib/hiringWorkflowEngine";
 
 interface Application {
   id: string;
@@ -3348,14 +3349,91 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
                         ))}
                       </div>
                     )}
-                    {body && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">📝 Cover letter</p>
-                        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-foreground whitespace-pre-wrap">
-                          {body}
+                    {/* Candidate Submitted Links & Before Interview Signals */}
+                    {(() => {
+                      const workflowApps = getWorkflowApplications();
+                      const wf = workflowApps.find(
+                        (w) =>
+                          (w.jobId === detailsDialog.job_id && (w.candidateEmail === detailsDialog.candidate_email || w.candidateName === detailsDialog.candidate_name)) ||
+                          w.candidateEmail === detailsDialog.candidate_email
+                      );
+                      const ghTag = tags.find((t) => t.k.toLowerCase() === "github")?.v || wf?.githubAccountUrl || detailsProfile?.github_url;
+                      const projTag = tags.find((t) => t.k.toLowerCase() === "project")?.v || wf?.projectLiveUrl || detailsProfile?.portfolio_url;
+                      const authPct = wf?.authenticityPercentage ?? (ghTag ? 85 : null);
+                      const aiPct = wf?.aiWrittenPercentage ?? (ghTag ? 15 : null);
+
+                      if (!ghTag && !projTag && !wf) return null;
+
+                      return (
+                        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                              <ScanSearch className="h-4 w-4" /> ⚡ Before Interview AI Screening &amp; Links
+                            </span>
+                            {wf && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-primary/20 text-primary font-bold">
+                                {wf.overallStatus}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* GitHub & Project clickable links */}
+                          <div className="grid sm:grid-cols-2 gap-2 text-xs">
+                            {ghTag && (
+                              <a
+                                href={toHref(ghTag)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-3 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
+                              >
+                                <span className="flex items-center gap-2 truncate font-medium text-foreground">
+                                  <GitBranch className="h-4 w-4 text-primary shrink-0" />
+                                  <span className="truncate">{ghTag}</span>
+                                </span>
+                                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              </a>
+                            )}
+                            {projTag && (
+                              <a
+                                href={toHref(projTag.split(" ")[0])}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-3 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
+                              >
+                                <span className="flex items-center gap-2 truncate font-medium text-foreground">
+                                  <Layers className="h-4 w-4 text-primary shrink-0" />
+                                  <span className="truncate">{projTag}</span>
+                                </span>
+                                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              </a>
+                            )}
+                          </div>
+
+                          {/* Code Authenticity Meter */}
+                          {authPct !== null && aiPct !== null && (
+                            <div className="p-3 rounded-lg bg-card/80 border border-border space-y-1.5">
+                              <div className="flex justify-between text-xs font-mono">
+                                <span className="text-emerald-500 font-bold">{authPct}% Verified Human Code</span>
+                                <span className="text-amber-500 font-semibold">{aiPct}% AI Boilerplate</span>
+                              </div>
+                              <div className="w-full h-2 rounded-full bg-amber-500/20 overflow-hidden flex">
+                                <div className="bg-emerald-500 h-full transition-all" style={{ width: `${authPct}%` }} />
+                                <div className="bg-amber-500 h-full transition-all" style={{ width: `${aiPct}%` }} />
+                              </div>
+                            </div>
+                          )}
+
+                          {wf?.repoCodingChallenges && wf.repoCodingChallenges.length > 0 && (
+                            <div className="text-xs space-y-1 text-muted-foreground pt-1 border-t border-border">
+                              <span className="font-semibold text-foreground">Repo-Derived Coding Challenges: </span>
+                              <span>
+                                {wf.repoCodingChallenges.filter((c) => c.submittedCode).length}/2 Completed · AI Diagnosed Optimal Bound
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}

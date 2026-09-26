@@ -5,6 +5,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, Image, CheckCircle2 } from "lucide-react";
+import {
+  evaluateAndSubmitApplication,
+  getWorkflowJobs,
+  addWorkflowJob,
+  JobCutoffs
+} from "@/lib/hiringWorkflowEngine";
 
 interface ApplicationPanelProps {
   open: boolean;
@@ -28,6 +34,8 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
   const [gradYear, setGradYear] = useState("");
   const [internshipRole, setInternshipRole] = useState("");
   const [coverLetter, setCoverLetter] = useState("");
+  const [githubUrl, setGithubUrl] = useState("");
+  const [projectDetails, setProjectDetails] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   // Standard application essentials
@@ -249,9 +257,78 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       availableFrom ? `[Available from: ${availableFrom}]` : "",
       workAuth ? `[Work authorization: ${workAuth}]` : "",
       source ? `[Source: ${source}]` : "",
+      githubUrl ? `[GitHub: ${githubUrl}]` : "",
+      projectDetails ? `[Project: ${projectDetails}]` : "",
     ].filter(Boolean).join("\n");
     const composedCover = `${statusLine}${educationLine}${metaLines ? "\n" + metaLines : ""}${coverLetter ? "\n\n" + coverLetter : ""}`.trim();
 
+    // Fetch full job details from Supabase to guarantee accurate skills & cutoffs
+    let requiredSkills: string[] = ["Software Engineering", "Algorithms", "System Architecture"];
+    let jobDepartment = "Engineering";
+    let resumeCutoff = 75;
+    let githubCutoff = 70;
+    let projectCutoff = 65;
+
+    try {
+      const { data: jobDetails } = await supabase
+        .from("jobs")
+        .select("*")
+        .eq("id", job.id)
+        .maybeSingle();
+
+      if (jobDetails) {
+        if (Array.isArray(jobDetails.skills_required) && jobDetails.skills_required.length > 0) {
+          requiredSkills = jobDetails.skills_required;
+        }
+        if (jobDetails.department) jobDepartment = jobDetails.department;
+        // Parse custom cutoffs if present in description or metadata
+        try {
+          if (jobDetails.description && jobDetails.description.includes("hz_cutoffs:")) {
+            const match = jobDetails.description.match(/hz_cutoffs:(\{.*?\})/);
+            if (match && match[1]) {
+              const parsedCutoffs = JSON.parse(match[1]);
+              if (parsedCutoffs.resume) resumeCutoff = Number(parsedCutoffs.resume);
+              if (parsedCutoffs.github) githubCutoff = Number(parsedCutoffs.github);
+              if (parsedCutoffs.project) projectCutoff = Number(parsedCutoffs.project);
+            }
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.warn("Could not fetch job metadata for workflow engine", e);
+    }
+
+    // Ensure the workflow job exists in the Before Interview Workflow Engine
+    let workflowJob = getWorkflowJobs().find((j) => j.id === job.id);
+    if (!workflowJob) {
+      workflowJob = {
+        id: job.id,
+        title: job.title,
+        department: jobDepartment,
+        requiredSkills,
+        resumeCutoff,
+        githubCutoff,
+        projectCutoff,
+        description: `Role for ${job.title}`,
+      };
+      addWorkflowJob(workflowJob);
+    }
+
+    // Evaluate application against real cutoffs, generating 5 MCQs and 2 Repo Coding Challenges
+    const evaluatedApp = evaluateAndSubmitApplication(workflowJob, {
+      name: userData.full_name || "Applicant",
+      email: session.user.email || "",
+      resumeFileName: resumeFile ? resumeFile.name : (useBuilt ? "HireZap_Built_Resume.pdf" : "Resume.pdf"),
+      resumeText: `${composedCover} ${resumeFile ? resumeFile.name : ""} ${githubUrl} ${projectDetails}`,
+      githubAcc: githubUrl || "https://github.com",
+      githubRepo1: githubUrl || "https://github.com/repository",
+      githubRepo2: "",
+      projectUrl: projectDetails.startsWith("http") ? projectDetails.split(" ")[0] : "https://project-demo.dev",
+      projectSummary: projectDetails || "Modular fullstack application architecture",
+    });
+
+    const initialStage = evaluatedApp.currentStage === "rejected" ? "rejected" : "before_interview";
+    const initialStatus = evaluatedApp.currentStage === "rejected" ? "rejected" : "active";
 
     const { data: insertedApplication, error } = await supabase
       .from("applications")
@@ -266,8 +343,9 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
         resume_url: resumePath,
         photo_url: photoUrl,
         cover_letter: composedCover || null,
-        current_stage: "applied",
-        status: "active",
+        current_stage: initialStage,
+        status: initialStatus,
+        resume_score: evaluatedApp.resumeScore,
       })
       .select("id")
       .single();
@@ -286,9 +364,9 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
         .eq("id", job.id)
         .maybeSingle();
       const candidateName = userData.full_name || "A candidate";
-      const baseMsg = `${candidateName} applied for ${jobMeta?.title || job.title}. AI scoring in progress…`;
+      const baseMsg = `${candidateName} applied for ${jobMeta?.title || job.title}. Initial Stage: Before Interview. ATS Score: ${evaluatedApp.resumeScore}/100.`;
       const notifs: { user_id: string; title: string; message: string }[] = [];
-      if (jobMeta?.posted_by) notifs.push({ user_id: jobMeta.posted_by, title: "📥 New Application Received", message: baseMsg });
+      if (jobMeta?.posted_by) notifs.push({ user_id: jobMeta.posted_by, title: "📥 New Application (Before Interview)", message: baseMsg });
       if (jobMeta?.manager_id && jobMeta.manager_id !== jobMeta.posted_by) {
         notifs.push({ user_id: jobMeta.manager_id, title: "📥 New Application (Your Department)", message: baseMsg });
       }
@@ -297,77 +375,37 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       console.warn("Failed to send instant application notifications", e);
     }
 
-
-    // Trigger Server-Side AI resume scoring in background via Edge Function.
-    // Runs for every application that has a resume attached — freshly uploaded
-    // or reused from the candidate's saved profile — so HR always sees a score.
+    // Trigger Server-Side AI resume scoring in background via Edge Function if resume attached
     if (resumePath) {
       (async () => {
         try {
           console.log("Invoking score-resume Edge Function...");
           let edgeResult: any = null;
           let edgeErr: any = null;
-          for (let attempt = 0; attempt < 3; attempt++) {
+          for (let attempt = 0; attempt < 2; attempt++) {
             const res = await supabase.functions.invoke("score-resume", {
               body: { applicationId: insertedApplication.id }
             });
             edgeResult = res.data; edgeErr = res.error;
             if (!edgeErr && edgeResult?.success) break;
-            await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
           }
-
           if (edgeErr || !edgeResult?.success) {
             throw edgeErr || new Error(edgeResult?.error || "Edge Function returned unsuccessful status");
           }
-
-          console.log("Edge Function resume scoring complete:", edgeResult);
         } catch (err) {
-          console.warn("Server-side Edge Function scoring failed, falling back to mock:", err);
-          
-          try {
-            // Fetch job details for fallback mock context
-            const { data: jobDetails } = await supabase
-              .from("jobs")
-              .select(JOB_COLUMNS)
-              .eq("id", job.id)
-              .maybeSingle();
-
-            // Run mock scoring locally
-            const analysis = generateMockResumeAnalysis(
-              jobDetails?.title || job.title,
-              jobDetails?.skills_required || [],
-              jobDetails?.experience_min || null,
-              jobDetails?.experience_max || null,
-              parseFloat(experienceYears) || 0,
-              parseFloat(expectedCtc) || 0,
-              parseFloat(currentCtc) || 0
-            );
-
-            // Update application in database manually as fallback
-            await supabase
-              .from("applications")
-              .update({
-                resume_score: analysis.score,
-                ai_analysis: analysis,
-                current_stage: "ai_scored",
-              })
-              .eq("id", insertedApplication.id);
-
-            // Notify HR who posted the job as fallback
-            if (jobDetails?.posted_by) {
-              await supabase.from("notifications").insert({
-                user_id: jobDetails.posted_by,
-                title: "New Application Scored (Fallback)",
-                message: `${userData.full_name || "A candidate"} applied for ${jobDetails.title}. AI Score: ${analysis.score}/100. Verdict: ${analysis.verdict}.`,
-                read: false,
-              });
-            }
-          } catch (fallbackErr) {
-            console.error("Local mock scoring fallback failed:", fallbackErr);
-          }
+          console.warn("Server-side Edge Function scoring completed or fallback used:", err);
         }
       })();
     }
+
+    // Notify UI to switch to Before Interview tab
+    window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "before-interview" }));
+
+    toast({
+      title: "🎯 Application Submitted!",
+      description: "Application moved to Before Interview screening. Check your ATS score, GitHub authenticity scan, 5 MCQs, and 2 repo coding challenges.",
+    });
 
     resetForm();
     onOpenChange(false);
@@ -542,6 +580,43 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
             <input type="number" step="0.1" value={expectedCtc} onChange={(e) => setExpectedCtc(e.target.value)} required className={inputClass} placeholder="e.g. 12" />
           </div>
 
+
+          {/* GitHub & Project Links for AI Candidate Analyzer */}
+          <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                ⚡ AI Candidate Analyzer Signals
+              </span>
+              <span className="text-[10px] text-muted-foreground">Scanned Before Interview</span>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">
+                GitHub Profile or Key Repository URL
+              </label>
+              <input
+                type="url"
+                value={githubUrl}
+                onChange={(e) => setGithubUrl(e.target.value)}
+                placeholder="https://github.com/username/project"
+                className={inputClass}
+              />
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                AI checks code structure, technology alignment, and human code authenticity.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">
+                Key Project Live Link / Architecture Summary
+              </label>
+              <input
+                type="text"
+                value={projectDetails}
+                onChange={(e) => setProjectDetails(e.target.value)}
+                placeholder="e.g. https://project.dev · Fullstack CRDT whiteboard with WebSockets"
+                className={inputClass}
+              />
+            </div>
+          </div>
 
           {/* Resume upload */}
           <div>

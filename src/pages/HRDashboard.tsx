@@ -5,13 +5,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useLiveData } from "@/hooks/useLiveData";
 import {
   Zap, BarChart3, Settings, Bell, LogOut, Plus, Users, Briefcase,
-  MessageSquare, Calendar, LayoutDashboard, Award, Workflow,
+  MessageSquare, Calendar, LayoutDashboard, Award, Workflow, ScanSearch,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import AddJobPanel from "@/components/AddJobPanel";
 import HRJobsView from "@/components/hr/HRJobsView";
 import HRCandidatesView from "@/components/hr/HRCandidatesView";
 import HRInterviewsView from "@/components/hr/HRInterviewsView";
+import BeforeInterviewHRPanel from "@/components/hr/BeforeInterviewHRPanel";
 import ChatSystem from "@/components/ChatSystem";
 import AIAssistantWidget from "@/components/AIAssistantWidget";
 import { useToast } from "@/hooks/use-toast";
@@ -41,13 +42,12 @@ const navItems = [
   { icon: LayoutDashboard, label: "Dashboard" },
   { icon: Briefcase, label: "Jobs" },
   { icon: Users, label: "Candidates" },
+  { icon: ScanSearch, label: "Before Interview" },
   { icon: Users, label: "Group Discussion" },
   { icon: Calendar, label: "Interviews" },
   { icon: Workflow, label: "Interview Process" },
-  { icon: MessageSquare, label: "Messages" },
   { icon: Award, label: "Hiring History" },
   { icon: BarChart3, label: "Analytics" },
-  { icon: Settings, label: "Settings" },
 ];
 
 const HRDashboard = () => {
@@ -224,6 +224,8 @@ const HRDashboard = () => {
         return <HRJobsView jobs={jobs} managers={managers} onPostJob={() => setPanelOpen(true)} onJobUpdated={fetchData} />;
       case "Candidates":
         return <HRCandidatesView companyId={companyId} initialJobId={candidatesInitialJobId} />;
+      case "Before Interview":
+        return <BeforeInterviewHRPanel />;
       case "Group Discussion":
         navigate("/gd-dashboard");
         return null;
@@ -231,14 +233,6 @@ const HRDashboard = () => {
         return <HRInterviewsView companyId={companyId} />;
       case "Hiring History":
         return <HiringHistoryView companyId={companyId} canDelete={userRole === "hr"} />;
-      case "Messages":
-        return (
-          <ChatSystem
-            currentUser={{ id: hrUserId, full_name: hrName, email: "", role: userRole, company_id: companyId }}
-            mode="staff"
-            companyId={companyId}
-          />
-        );
       case "Analytics":
         return (
           <div className="space-y-4">
@@ -260,42 +254,6 @@ const HRDashboard = () => {
             </div>
           </div>
         );
-      case "Settings":
-        return (
-          <div className="space-y-6 max-w-5xl mx-auto">
-            <div className="rounded-xl border border-border bg-card p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <Settings className="h-5 w-5 text-primary" />
-                <h2 className="text-lg font-semibold text-foreground">Settings</h2>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => navigate("/settings/notifications")}>Notification preferences</Button>
-                <Button variant="outline" onClick={() => navigate("/notifications")}>Notification center</Button>
-                {companyId && (
-                  <Button variant="outline" onClick={() => navigate(`/company/${companyId}`)}>View public company page</Button>
-                )}
-              </div>
-            </div>
-            {companyId && (
-              <JobTemplatesManager companyId={companyId} hrUserId={hrUserId} managers={managers} />
-            )}
-            {companyId && hrUserId && (
-              <OfferTemplatesManager companyId={companyId} userId={hrUserId} />
-            )}
-            {companyId ? (
-              <div className="rounded-xl border border-border bg-card p-6">
-                <h3 className="text-base font-semibold text-foreground mb-4">Company Profile</h3>
-                <CompanyProfileEditor companyId={companyId} />
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-                You are not linked to a company yet. Ask your admin to assign you.
-              </div>
-            )}
-          </div>
-        );
-
-
       default:
         // Dashboard view
         return (
