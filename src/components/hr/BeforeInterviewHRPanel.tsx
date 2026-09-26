@@ -33,8 +33,8 @@ export const BeforeInterviewHRPanel = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
 
-  // All 7 Tabs available for HR including confidential Tab 7 HR Evidence Decision
-  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "scorecard" | "hrevidence">("ats");
+  // 5 HR Screening Dossier Tabs
+  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "hrevidence">("ats");
 
   const loadData = () => {
     const loadedApps = getWorkflowApplications();
@@ -64,14 +64,17 @@ export const BeforeInterviewHRPanel = () => {
 
   const currentApp = filteredApps.find((a) => a.id === selectedAppId) || filteredApps[0] || null;
 
+  const resumeCutoffScore = activeJob?.resumeCutoff || 90;
+  const isResumePassed = currentApp ? currentApp.resumeScore >= resumeCutoffScore && currentApp.resumePassed : false;
+  const isGithubPassed = currentApp ? isResumePassed && currentApp.githubPassed && currentApp.authenticityPercentage >= 70 : false;
+  const isMCQPassed = currentApp ? isGithubPassed && (currentApp.mcqScore !== undefined || currentApp.generatedMCQs?.some(q => q.userAnswer !== undefined)) : false;
+
   const tabs = [
-    { id: "ats", label: "ATS & Resume", icon: FileText, num: "01" },
-    { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02" },
-    { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03" },
-    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04" },
-    { id: "interview", label: "Dynamic AI Interview", icon: Bot, num: "05" },
-    { id: "scorecard", label: "Skill Map & Plan", icon: Award, num: "06" },
-    { id: "hrevidence", label: "HR Evidence Decision", icon: ShieldCheck, num: "07" },
+    { id: "ats", label: "ATS & Resume", icon: FileText, num: "01", locked: false },
+    { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02", locked: !isResumePassed },
+    { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03", locked: !isGithubPassed },
+    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04", locked: !isMCQPassed },
+    { id: "hrevidence", label: "Recruiter Decision", icon: ShieldCheck, num: "05", locked: false },
   ];
 
   const handleAdvanceToInterview = async (app: CandidateApplicationSubmission) => {
@@ -513,25 +516,43 @@ export const BeforeInterviewHRPanel = () => {
             </div>
           </div>
 
-          {/* 7 Stage Navigation Tabs */}
+          {/* 5 Stage Navigation Tabs */}
           <div className="border-b border-ink/10 bg-paper overflow-x-auto scrollbar-none">
             <div className="flex items-center min-w-max px-4">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
+                const isLocked = tab.locked;
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`flex items-center gap-2 py-4 px-4 text-xs font-medium border-b-2 transition-all ${
+                    onClick={() => {
+                      if (isLocked) {
+                        toast({
+                          title: `🔒 Stage ${tab.num} Locked`,
+                          description: tab.id === "github"
+                            ? `Candidate failed ATS Resume cutoff (${currentApp.resumeScore}/${resumeCutoffScore}%).`
+                            : tab.id === "mcq"
+                            ? "Requires passing ATS Resume and GitHub screening."
+                            : "Requires completing Stage 03 MCQs.",
+                          variant: "destructive",
+                        });
+                      } else {
+                        setActiveTab(tab.id as any);
+                      }
+                    }}
+                    className={`flex items-center gap-2 py-4 px-4 text-xs font-medium border-b-2 transition-all relative ${
                       isActive
                         ? "border-forest text-forest font-semibold"
+                        : isLocked
+                        ? "border-transparent text-ink-muted/60 hover:text-ink-muted cursor-not-allowed"
                         : "border-transparent text-ink-soft hover:text-ink hover:border-ink/20"
                     }`}
                   >
                     <span className="font-mono text-[10px] text-ink-muted">{tab.num}</span>
                     <Icon className="w-4 h-4" />
                     <span>{tab.label}</span>
+                    {isLocked && <Lock className="w-3 h-3 text-ink-muted/70 ml-0.5" />}
                   </button>
                 );
               })}
@@ -556,10 +577,10 @@ export const BeforeInterviewHRPanel = () => {
                       <div className="text-xs uppercase font-mono tracking-widest text-ink-muted mb-3">ATS Compatibility Score</div>
                       <div className="relative flex items-center justify-center">
                         <div className={`w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center bg-paper shadow-inner ${
-                          currentApp.resumePassed ? "border-forest/30" : "border-destructive/30"
+                          isResumePassed ? "border-forest/30" : "border-destructive/30"
                         }`}>
                           <span className={`font-serif-display text-4xl font-bold ${
-                            currentApp.resumePassed ? "text-forest" : "text-destructive"
+                            isResumePassed ? "text-forest" : "text-destructive"
                           }`}>
                             {currentApp.resumeScore}
                           </span>
@@ -570,7 +591,7 @@ export const BeforeInterviewHRPanel = () => {
                         Evaluated against job requirements, verified project context, and keyword frequency.
                       </div>
                       <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
-                        Configured Cutoff: {activeJob?.resumeCutoff || 75}% · Status: <span className={currentApp.resumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{currentApp.resumePassed ? "Passed" : "Below Cutoff"}</span>
+                        Cutoff: {resumeCutoffScore}% · Status: <span className={isResumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{isResumePassed ? "Passed (Eligible for GitHub)" : "Auto-Rejected (Below Cutoff)"}</span>
                       </div>
                     </div>
 
@@ -656,95 +677,109 @@ export const BeforeInterviewHRPanel = () => {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  <div className="p-4 rounded-xl bg-forest/5 border border-forest/15 flex items-start gap-3">
-                    <ShieldCheck className="w-5 h-5 text-forest shrink-0 mt-0.5" />
-                    <div className="text-xs text-ink-soft">
-                      <span className="font-semibold text-ink">Code Authenticity Verification: </span>
-                      GitHub evidence is analyzed for genuine developer commits vs AI boilerplate. We formulate verification tasks from repository implementations.
+                  {!isResumePassed ? (
+                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 02 Locked: Failed ATS Resume Cutoff</h4>
+                      <p className="text-xs text-ink-soft max-w-md mx-auto">
+                        Candidate scored {currentApp.resumeScore}/100, which is below the required {resumeCutoffScore}% ATS cutoff. Candidate cannot be evaluated on GitHub or Projects.
+                      </p>
                     </div>
-                  </div>
-
-                  {/* AI Code Authenticity Meter */}
-                  <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Estimation</span>
-                      <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Engineering</span>
-                    </div>
-                    <div className="w-full h-3 rounded-full bg-amber-200 overflow-hidden flex">
-                      <div
-                        className="bg-emerald-600 h-full transition-all"
-                        style={{ width: `${currentApp.authenticityPercentage}%` }}
-                      />
-                      <div
-                        className="bg-amber-500 h-full transition-all"
-                        style={{ width: `${currentApp.aiWrittenPercentage}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[11px] font-mono text-ink-muted">
-                      <span>{currentApp.authenticityPercentage}% Human Logic</span>
-                      <span>{currentApp.aiWrittenPercentage}% AI Boilerplate</span>
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <span className="font-mono font-semibold text-sm text-ink flex items-center gap-1.5">
-                            <GitBranch className="w-3.5 h-3.5 text-forest" />
-                            Submitted Repositories
-                          </span>
-                          <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
+                  ) : (
+                    <>
+                      <div className="p-4 rounded-xl bg-forest/5 border border-forest/15 flex items-start gap-3">
+                        <ShieldCheck className="w-5 h-5 text-forest shrink-0 mt-0.5" />
+                        <div className="text-xs text-ink-soft">
+                          <span className="font-semibold text-ink">Code Authenticity Verification: </span>
+                          GitHub evidence is analyzed for genuine developer commits vs AI boilerplate. We formulate verification tasks from repository implementations.
                         </div>
-                        <div className="space-y-1.5 mb-3 font-mono text-xs">
-                          <div>👤 Profile: <a href={currentApp.githubAccountUrl} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubAccountUrl}</a></div>
-                          <div>📦 Repo 1: <a href={currentApp.githubRepo1Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo1Url}</a></div>
-                          {currentApp.githubRepo2Url && (
-                            <div>📦 Repo 2: <a href={currentApp.githubRepo2Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo2Url}</a></div>
+                      </div>
+
+                      {/* AI Code Authenticity Meter */}
+                      <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Estimation</span>
+                          <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Engineering</span>
+                        </div>
+                        <div className="w-full h-3 rounded-full bg-amber-200 overflow-hidden flex">
+                          <div
+                            className="bg-emerald-600 h-full transition-all"
+                            style={{ width: `${currentApp.authenticityPercentage}%` }}
+                          />
+                          <div
+                            className="bg-amber-500 h-full transition-all"
+                            style={{ width: `${currentApp.aiWrittenPercentage}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[11px] font-mono text-ink-muted">
+                          <span>{currentApp.authenticityPercentage}% Human Logic</span>
+                          <span>{currentApp.aiWrittenPercentage}% AI Boilerplate</span>
+                        </div>
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="font-mono font-semibold text-sm text-ink flex items-center gap-1.5">
+                                <GitBranch className="w-3.5 h-3.5 text-forest" />
+                                Submitted Repositories
+                              </span>
+                              <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
+                            </div>
+                            <div className="space-y-1.5 mb-3 font-mono text-xs">
+                              <div>👤 Profile: <a href={currentApp.githubAccountUrl} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubAccountUrl}</a></div>
+                              <div>📦 Repo 1: <a href={currentApp.githubRepo1Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo1Url}</a></div>
+                              {currentApp.githubRepo2Url && (
+                                <div>📦 Repo 2: <a href={currentApp.githubRepo2Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo2Url}</a></div>
+                              )}
+                            </div>
+                            
+                            <div className="text-[11px] font-semibold text-ink mb-1.5">Detected Code Signals:</div>
+                            <ul className="space-y-1 mb-4 text-xs text-ink-soft">
+                              {currentApp.codeSignals.map((sig, i) => (
+                                <li key={i} className="flex items-start gap-1.5">
+                                  <span className="text-forest shrink-0">▸</span>
+                                  <span>{sig}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="pt-3 border-t border-ink/10 text-xs">
+                            <span className="font-semibold text-ink">Authenticity Status: </span>
+                            <span className={currentApp.githubPassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>
+                              {currentApp.githubPassed ? "Verified Human Engineering" : "High AI Boilerplate"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Project Architecture */}
+                        <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
+                          <div>
+                            <h4 className="font-semibold text-sm text-ink mb-2 flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-forest" />
+                              Extracted Project Architecture ({currentApp.projectValidationScore}/100)
+                            </h4>
+                            <p className="text-xs text-ink-soft mb-3">{currentApp.projectArchitectureSummary || currentApp.projectFeedback}</p>
+                            <div className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto mb-3">
+                              {currentApp.projectArchitectureDetected}
+                            </div>
+                          </div>
+
+                          {currentApp.projectLiveUrl && (
+                            <div className="pt-3 border-t border-ink/10 text-xs">
+                              <a href={currentApp.projectLiveUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-forest font-semibold hover:underline">
+                                <ExternalLink className="w-3.5 h-3.5" /> View Live Project Deployment
+                              </a>
+                            </div>
                           )}
                         </div>
-                        
-                        <div className="text-[11px] font-semibold text-ink mb-1.5">Detected Code Signals:</div>
-                        <ul className="space-y-1 mb-4 text-xs text-ink-soft">
-                          {currentApp.codeSignals.map((sig, i) => (
-                            <li key={i} className="flex items-start gap-1.5">
-                              <span className="text-forest shrink-0">▸</span>
-                              <span>{sig}</span>
-                            </li>
-                          ))}
-                        </ul>
                       </div>
-
-                      <div className="pt-3 border-t border-ink/10 text-xs">
-                        <span className="font-semibold text-ink">Authenticity Status: </span>
-                        <span className={currentApp.githubPassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>
-                          {currentApp.githubPassed ? "Verified Human Engineering" : "High AI Boilerplate"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Project Architecture */}
-                    <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
-                      <div>
-                        <h4 className="font-semibold text-sm text-ink mb-2 flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-forest" />
-                          Extracted Project Architecture ({currentApp.projectValidationScore}/100)
-                        </h4>
-                        <p className="text-xs text-ink-soft mb-3">{currentApp.projectArchitectureSummary || currentApp.projectFeedback}</p>
-                        <div className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto mb-3">
-                          {currentApp.projectArchitectureDetected}
-                        </div>
-                      </div>
-
-                      {currentApp.projectLiveUrl && (
-                        <div className="pt-3 border-t border-ink/10 text-xs">
-                          <a href={currentApp.projectLiveUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-forest font-semibold hover:underline">
-                            <ExternalLink className="w-3.5 h-3.5" /> View Live Project Deployment
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    </>
+                  )}
                 </motion.div>
               )}
 
@@ -758,62 +793,84 @@ export const BeforeInterviewHRPanel = () => {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
-                    <span className="text-ink-soft">
-                      Generated from: <strong className="text-ink">Job Requirements + Candidate Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
-                    </span>
-                    <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
-                      5 Personalized Questions Verified
-                    </span>
-                  </div>
-
-                  <div className="space-y-4">
-                    {currentApp.generatedMCQs.map((q, idx) => (
-                      <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper">
-                        <div className="flex items-start justify-between gap-4 mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-forest text-paper text-xs font-mono font-semibold grid place-items-center shrink-0">
-                              {idx + 1}
-                            </span>
-                            <span className="text-xs font-mono font-medium text-forest uppercase tracking-wider">{q.topic}</span>
-                          </div>
-                          <span className="text-[10px] font-mono text-ink-muted border border-ink/10 px-2 py-0.5 rounded-full hidden sm:inline">
-                            Source: {q.repoSource}
-                          </span>
-                        </div>
-
-                        <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
-
-                        <div className="grid gap-2 pl-8">
-                          {q.options.map((opt, optIdx) => {
-                            const isCorrect = optIdx === q.correctIndex;
-                            return (
-                              <div
-                                key={optIdx}
-                                className={`p-2.5 rounded-xl text-xs flex items-start gap-2.5 ${
-                                  isCorrect
-                                    ? "bg-forest/10 border border-forest/30 text-ink font-medium"
-                                    : "bg-paper-2 text-ink-soft border border-ink/5"
-                                }`}
-                              >
-                                <span className="font-mono shrink-0 w-4 font-semibold">{String.fromCharCode(65 + optIdx)}.</span>
-                                <span className="flex-1">{opt}</span>
-                                {isCorrect && (
-                                  <span className="ml-auto text-[10px] font-mono uppercase bg-forest text-paper px-1.5 py-0.5 rounded shrink-0">
-                                    Verified Correct
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        <div className="mt-3 pl-8 text-xs text-ink-muted italic border-t border-ink/5 pt-2">
-                          <strong>AI Rationale:</strong> {q.rationale}
-                        </div>
+                  {!isGithubPassed ? (
+                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
+                        <Lock className="w-6 h-6" />
                       </div>
-                    ))}
-                  </div>
+                      <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 03 Locked: Candidate Failed Prior Cutoffs</h4>
+                      <p className="text-xs text-ink-soft max-w-md mx-auto">
+                        Candidate did not meet ATS Resume or GitHub Code Authenticity requirements to reach the MCQ stage.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
+                        <span className="text-ink-soft">
+                          Generated from: <strong className="text-ink">Job Requirements + Candidate Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
+                        </span>
+                        <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
+                          Score: {currentApp.mcqScore !== undefined ? `${currentApp.mcqScore} / ${currentApp.generatedMCQs.length} Correct` : "5 Personalized Questions Generated"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-4">
+                        {currentApp.generatedMCQs.map((q, idx) => (
+                          <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper">
+                            <div className="flex items-start justify-between gap-4 mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-forest text-paper text-xs font-mono font-semibold grid place-items-center shrink-0">
+                                  {idx + 1}
+                                </span>
+                                <span className="text-xs font-mono font-medium text-forest uppercase tracking-wider">{q.topic}</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-ink-muted border border-ink/10 px-2 py-0.5 rounded-full hidden sm:inline">
+                                Source: {q.repoSource}
+                              </span>
+                            </div>
+
+                            <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
+
+                            <div className="grid gap-2 pl-8">
+                              {q.options.map((opt, optIdx) => {
+                                const isCorrect = optIdx === q.correctIndex;
+                                const isCandidateSelected = q.userAnswer === optIdx;
+                                return (
+                                  <div
+                                    key={optIdx}
+                                    className={`p-2.5 rounded-xl text-xs flex items-start gap-2.5 ${
+                                      isCorrect
+                                        ? "bg-forest/10 border border-forest/30 text-ink font-medium"
+                                        : isCandidateSelected
+                                        ? "bg-destructive/10 border border-destructive/30 text-destructive"
+                                        : "bg-paper-2 text-ink-soft border border-ink/5"
+                                    }`}
+                                  >
+                                    <span className="font-mono shrink-0 w-4 font-semibold">{String.fromCharCode(65 + optIdx)}.</span>
+                                    <span className="flex-1">{opt}</span>
+                                    {isCandidateSelected && (
+                                      <span className="ml-auto text-[10px] font-mono uppercase bg-ink text-paper px-1.5 py-0.5 rounded shrink-0">
+                                        Candidate Choice
+                                      </span>
+                                    )}
+                                    {isCorrect && (
+                                      <span className="ml-1 text-[10px] font-mono uppercase bg-forest text-paper px-1.5 py-0.5 rounded shrink-0">
+                                        Verified Correct
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="mt-3 pl-8 text-xs text-ink-muted italic border-t border-ink/5 pt-2">
+                              <strong>AI Rationale:</strong> {q.rationale}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               )}
 
@@ -827,223 +884,105 @@ export const BeforeInterviewHRPanel = () => {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  <div className="flex items-center justify-between border-b border-ink/10 pb-4">
-                    <div>
-                      <h4 className="font-serif-display text-xl text-ink">Adaptive DSA Sandbox &amp; Candidate Submissions</h4>
-                      <p className="text-xs text-ink-soft mt-0.5">
-                        Extracted from candidate repositories with AI line-by-line error diagnosis and algorithmic efficiency checks.
+                  {!isMCQPassed ? (
+                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-700 grid place-items-center mx-auto">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 04 Locked: Candidate Has Not Finished MCQs</h4>
+                      <p className="text-xs text-ink-soft max-w-md mx-auto">
+                        Candidate must complete Stage 03 MCQs before coding challenges are unlocked.
                       </p>
                     </div>
-                    <span className="text-xs font-mono text-forest bg-forest/10 px-2.5 py-1 rounded-full font-semibold">
-                      2 Challenges Evaluated
-                    </span>
-                  </div>
-
-                  <div className="space-y-4">
-                    {currentApp.repoCodingChallenges.map((challenge, idx) => (
-                      <div key={challenge.id} className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                          <div className="font-medium text-sm text-ink">
-                            Challenge {idx + 1}: {challenge.title}
-                          </div>
-                          <span className="text-[10px] font-mono text-forest bg-forest/10 px-2 py-0.5 rounded-full self-start sm:self-auto">
-                            Source: {challenge.repoContext}
-                          </span>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between border-b border-ink/10 pb-4">
+                        <div>
+                          <h4 className="font-serif-display text-xl text-ink">Adaptive DSA Sandbox &amp; Candidate Submissions</h4>
+                          <p className="text-xs text-ink-soft mt-0.5">
+                            Extracted from candidate repositories with AI line-by-line error diagnosis and algorithmic efficiency checks.
+                          </p>
                         </div>
+                        <span className="text-xs font-mono text-forest bg-forest/10 px-2.5 py-1 rounded-full font-semibold">
+                          2 Challenges Evaluated
+                        </span>
+                      </div>
 
-                        <p className="text-xs text-ink-soft leading-relaxed">
-                          {challenge.problemStatement}
-                        </p>
-
-                        {/* Candidate Code Submission */}
-                        <div className="space-y-1">
-                          <div className="text-[11px] font-semibold text-ink flex items-center gap-1">
-                            <Terminal className="w-3.5 h-3.5 text-forest" /> Candidate's Submitted Code:
-                          </div>
-                          <pre className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto max-h-48 leading-relaxed">
-                            {challenge.submittedCode || challenge.starterCode}
-                          </pre>
-                        </div>
-
-                        {/* AI Review Diagnostics */}
-                        {challenge.aiCodeReview && (
-                          <div className={`p-3.5 rounded-xl border text-xs space-y-2 ${
-                            challenge.aiCodeReview.passed
-                              ? "bg-forest/10 border-forest/30 text-forest"
-                              : "bg-destructive/10 border-destructive/30 text-destructive"
-                          }`}>
-                            <div className="flex items-center justify-between font-semibold">
-                              <span className="flex items-center gap-1.5">
-                                {challenge.aiCodeReview.passed ? (
-                                  <CheckCircle2 className="w-4 h-4 text-forest" />
-                                ) : (
-                                  <AlertCircle className="w-4 h-4 text-destructive" />
-                                )}
-                                AI Diagnostic: {challenge.aiCodeReview.feedback}
-                              </span>
-                              <span className="font-mono text-[10px]">
-                                Efficiency: {challenge.aiCodeReview.efficiencyRating}
+                      <div className="space-y-4">
+                        {currentApp.repoCodingChallenges.map((challenge, idx) => (
+                          <div key={challenge.id} className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                              <div className="font-medium text-sm text-ink">
+                                Challenge {idx + 1}: {challenge.title}
+                              </div>
+                              <span className="text-[10px] font-mono text-forest bg-forest/10 px-2 py-0.5 rounded-full self-start sm:self-auto">
+                                Source: {challenge.repoContext}
                               </span>
                             </div>
 
-                            {challenge.aiCodeReview.errorsDetected.length > 0 && (
-                              <div className="space-y-1 pt-1 border-t border-destructive/20">
-                                <span className="text-[11px] font-semibold block">Detected Code Errors:</span>
-                                {challenge.aiCodeReview.errorsDetected.map((err, i) => (
-                                  <div key={i} className="text-[11px] flex items-start gap-1 font-mono">
-                                    <Bug className="w-3 h-3 mt-0.5 shrink-0" />
-                                    <span>{err}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {challenge.aiCodeReview.fixSuggestion && (
-                              <div className="text-[11px] text-ink-soft bg-paper/80 p-2.5 rounded-lg border border-ink/5 mt-1 font-mono">
-                                <strong>AI Suggestion / Fix: </strong> {challenge.aiCodeReview.fixSuggestion}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* TAB 5: DYNAMIC AI INTERVIEW */}
-              {activeTab === "interview" && (
-                <motion.div
-                  key={currentApp.id + "-interview"}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-                >
-                  <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 text-xs text-ink-soft">
-                    <strong className="text-ink">Conversational Probing Logic: </strong>
-                    The AI does not follow a static script. It identifies technical assertions from the candidate's responses and crafts adaptive follow-ups to verify depth and probe detected knowledge boundaries.
-                  </div>
-
-                  <div className="space-y-4">
-                    {currentApp.aiInterviewDialogue.map((turn) => (
-                      <div key={turn.turn} className="p-5 rounded-2xl border border-ink/10 bg-paper space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-semibold text-forest uppercase tracking-wider">
-                            Turn {turn.turn} · {turn.topic}
-                          </span>
-                          <span className="text-[11px] font-mono text-ink-muted">
-                            Confidence: {(turn.aiEvaluation.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
-
-                        <div className="flex items-start gap-3 bg-paper-2 p-3.5 rounded-xl border border-ink/10">
-                          <Bot className="w-4 h-4 text-forest shrink-0 mt-0.5" />
-                          <div className="text-xs">
-                            <span className="font-semibold text-ink">AI Interviewer: </span>
-                            <span className="text-ink-soft">{turn.question}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-3 bg-forest/5 p-3.5 rounded-xl border border-forest/15">
-                          <div className="w-5 h-5 rounded-full bg-forest text-paper text-[10px] font-mono grid place-items-center shrink-0 mt-0.5">
-                            {currentApp.candidateName.charAt(0)}
-                          </div>
-                          <div className="text-xs">
-                            <span className="font-semibold text-ink">{currentApp.candidateName}: </span>
-                            <span className="text-ink-soft leading-relaxed">{turn.candidateAnswer}</span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-ink/5 border border-ink/10 text-xs space-y-1">
-                          <div className="text-ink font-medium">AI Realtime Evaluation:</div>
-                          <div className="text-ink-soft">✓ {turn.aiEvaluation.demonstratedKnowledge}</div>
-                          {turn.aiEvaluation.gapFound && (
-                            <div className="text-amber-800">⚠ Boundary: {turn.aiEvaluation.gapFound}</div>
-                          )}
-                          <div className="text-forest font-mono text-[11px] pt-1">
-                            ↳ Dynamic Follow-up: "{turn.aiEvaluation.adaptiveFollowUp}"
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* TAB 6: SKILL MAP & IMPROVEMENT PLAN */}
-              {activeTab === "scorecard" && (
-                <motion.div
-                  key={currentApp.id + "-scorecard"}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-                >
-                  {/* Skill Map */}
-                  <div>
-                    <h4 className="font-serif-display text-xl text-ink mb-1">Candidate Transparent Skill Map</h4>
-                    <p className="text-xs text-ink-soft mb-4">
-                      Transparent multi-tier assessment showing exactly which skills were demonstrated, currently developing, or need further verification.
-                    </p>
-
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {currentApp.skillMap.map((s) => {
-                        let badgeClass = "bg-emerald-500/10 text-emerald-700 border-emerald-500/30";
-                        if (s.status === "Developing") badgeClass = "bg-blue-500/10 text-blue-700 border-blue-500/30";
-                        if (s.status === "Needs Improvement") badgeClass = "bg-amber-500/10 text-amber-700 border-amber-500/30";
-                        if (s.status === "Not Assessed") badgeClass = "bg-zinc-500/10 text-zinc-600 border-zinc-500/20";
-
-                        return (
-                          <div key={s.skill} className="p-4 rounded-xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
-                            <div>
-                              <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <span className="font-semibold text-xs text-ink">{s.skill}</span>
-                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-semibold ${badgeClass}`}>
-                                  {s.status}
-                                </span>
-                              </div>
-                              <div className="text-[10px] font-mono text-ink-muted uppercase mb-2">{s.category}</div>
-                            </div>
-                            <p className="text-[11px] text-ink-soft leading-relaxed border-t border-ink/5 pt-2">
-                              {s.evidenceNote}
+                            <p className="text-xs text-ink-soft leading-relaxed">
+                              {challenge.problemStatement}
                             </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
 
-                  {/* Improvement Plan */}
-                  <div className="p-6 rounded-2xl border border-ink/10 bg-paper">
-                    <h4 className="font-serif-display text-lg text-ink mb-1">Personalized Improvement Plan</h4>
-                    <p className="text-xs text-ink-soft mb-4">
-                      HireZap empowers candidates with high-yield next steps derived from detected assessment gaps.
-                    </p>
+                            {/* Candidate Code Submission */}
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-semibold text-ink flex items-center gap-1">
+                                <Terminal className="w-3.5 h-3.5 text-forest" /> Candidate's Submitted Code:
+                              </div>
+                              <pre className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto max-h-48 leading-relaxed">
+                                {challenge.submittedCode || challenge.starterCode}
+                              </pre>
+                            </div>
 
-                    <div className="space-y-3">
-                      {currentApp.improvementPlan.map((plan, i) => (
-                        <div key={i} className="p-4 rounded-xl border border-ink/10 bg-paper-2 text-xs space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold text-ink">{plan.area}</span>
-                            <span className="font-mono text-[10px] uppercase font-bold text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded">
-                              {plan.priority} Priority
-                            </span>
+                            {/* AI Review Diagnostics */}
+                            {challenge.aiCodeReview && (
+                              <div className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                                challenge.aiCodeReview.passed
+                                  ? "bg-forest/10 border-forest/30 text-forest"
+                                  : "bg-destructive/10 border-destructive/30 text-destructive"
+                              }`}>
+                                <div className="flex items-center justify-between font-semibold">
+                                  <span className="flex items-center gap-1.5">
+                                    {challenge.aiCodeReview.passed ? (
+                                      <CheckCircle2 className="w-4 h-4 text-forest" />
+                                    ) : (
+                                      <AlertCircle className="w-4 h-4 text-destructive" />
+                                    )}
+                                    AI Diagnostic: {challenge.aiCodeReview.feedback}
+                                  </span>
+                                  <span className="font-mono text-[10px]">
+                                    Efficiency: {challenge.aiCodeReview.efficiencyRating}
+                                  </span>
+                                </div>
+
+                                {challenge.aiCodeReview.errorsDetected.length > 0 && (
+                                  <div className="space-y-1 pt-1 border-t border-destructive/20">
+                                    <span className="text-[11px] font-semibold block">Detected Code Errors:</span>
+                                    {challenge.aiCodeReview.errorsDetected.map((err, i) => (
+                                      <div key={i} className="text-[11px] flex items-start gap-1 font-mono">
+                                        <Bug className="w-3 h-3 mt-0.5 shrink-0" />
+                                        <span>{err}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {challenge.aiCodeReview.fixSuggestion && (
+                                  <div className="text-[11px] text-ink-soft bg-paper/80 p-2.5 rounded-lg border border-ink/5 mt-1 font-mono">
+                                    <strong>AI Suggestion / Fix: </strong> {challenge.aiCodeReview.fixSuggestion}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <div className="text-ink-soft">{plan.recommendation}</div>
-                          <div className="text-forest font-mono text-[11px] pt-1">
-                            Suggested Action: {plan.suggestedAction}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               )}
 
-              {/* TAB 7: HR EVIDENCE DECISION STUDIO */}
+              {/* TAB 5: RECRUITER DECISION */}
               {activeTab === "hrevidence" && (
                 <motion.div
                   key={currentApp.id + "-hrevidence"}
@@ -1058,7 +997,7 @@ export const BeforeInterviewHRPanel = () => {
                       <div>
                         <div className="text-xs font-mono uppercase tracking-widest text-ink-muted">AI Structured Synthesis</div>
                         <h4 className="font-serif-display text-2xl text-ink">
-                          Recommendation: <span className="text-forest">{currentApp.hrEvidence?.overallRecommendation || "Hire with Coaching"}</span>
+                          Recommendation: <span className="text-forest">{currentApp.hrEvidence?.overallRecommendation || (isResumePassed && isGithubPassed ? "Strong Hire" : "Needs Further Technical Evaluation")}</span>
                         </h4>
                       </div>
                       <div className="px-3 py-1.5 rounded-full bg-forest text-paper font-mono text-xs font-semibold flex items-center gap-1.5 self-start">
@@ -1106,21 +1045,21 @@ export const BeforeInterviewHRPanel = () => {
                         <span>{currentApp.hrEvidence?.decisionNotes || "Advance candidate to interview pipeline or reject with note."}</span>
                       </div>
                       <div className="flex gap-2">
+                        {currentApp.currentStage !== "rejected" && isResumePassed && isGithubPassed && (
+                          <button
+                            onClick={() => handleAdvanceToInterview(currentApp)}
+                            className="px-4 py-2 rounded-full bg-forest text-paper font-medium hover:bg-forest/90 transition-colors flex items-center gap-1.5"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Advance to Interview Process
+                          </button>
+                        )}
                         {currentApp.currentStage !== "rejected" && (
-                          <>
-                            <button
-                              onClick={() => handleAdvanceToInterview(currentApp)}
-                              className="px-4 py-2 rounded-full bg-forest text-paper font-medium hover:bg-forest/90 transition-colors flex items-center gap-1.5"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Advance to Interview Process
-                            </button>
-                            <button
-                              onClick={() => handleReject(currentApp)}
-                              className="px-4 py-2 rounded-full border border-destructive text-destructive-foreground hover:bg-destructive/10 transition-colors"
-                            >
-                              Reject with Explanation
-                            </button>
-                          </>
+                          <button
+                            onClick={() => handleReject(currentApp)}
+                            className="px-4 py-2 rounded-full border border-destructive text-destructive-foreground hover:bg-destructive/10 transition-colors"
+                          >
+                            Reject with Explanation
+                          </button>
                         )}
                         {currentApp.currentStage === "rejected" && (
                           <span className="px-3 py-1.5 rounded-full bg-destructive/20 text-destructive-foreground font-mono font-semibold">
@@ -1137,7 +1076,7 @@ export const BeforeInterviewHRPanel = () => {
 
           {/* Footer Bar */}
           <div className="p-4 bg-paper-2 border-t border-ink/10 flex items-center justify-between text-xs text-ink-muted">
-            <span>💡 All 7 stages reflect real-time candidate data and recruiter decision controls.</span>
+            <span>💡 All 5 stages reflect real-time candidate data and recruiter decision controls.</span>
             <span className="font-mono text-[11px] text-forest font-medium hidden sm:inline">100% Explainable AI Verification</span>
           </div>
         </div>

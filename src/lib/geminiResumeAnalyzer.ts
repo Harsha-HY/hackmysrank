@@ -37,30 +37,6 @@ export interface GeminiAnalysisResult {
     starterCode: string;
     testCases: { input: string; expectedOutput: string }[];
   }[];
-  aiInterviewDialogue: {
-    turn: number;
-    topic: string;
-    question: string;
-    candidateAnswer: string;
-    aiEvaluation: {
-      demonstratedKnowledge: string;
-      confidence: number;
-      gapFound: string | null;
-      adaptiveFollowUp: string;
-    };
-  }[];
-  skillMap: {
-    skill: string;
-    category: string;
-    status: "Demonstrated" | "Developing" | "Needs Improvement" | "Not Assessed";
-    evidenceNote: string;
-  }[];
-  improvementPlan: {
-    priority: "High" | "Medium" | "Low";
-    area: string;
-    recommendation: string;
-    suggestedAction: string;
-  }[];
   hrEvidence: {
     overallRecommendation: "Strong Hire" | "Hire with Coaching" | "Consider" | "Needs Further Technical Evaluation";
     summary: string;
@@ -113,62 +89,102 @@ export async function analyzeBeforeInterviewWithGemini(
     return null;
   }
 
-  const prompt = `You are an expert technical ATS resume and code evaluator for high-growth tech teams.
-Analyze the following candidate's application against the target job requirements and return a valid JSON object matching the requested schema.
+  const prompt = `You are a world-class Technical Hiring Screener and ATS (Applicant Tracking System) Engine for top tech companies.
+Your job is to rigorously evaluate a candidate application against the target job posting across 4 stages.
+
+CRITICAL SCORING RULE:
+- If the candidate's resume/bio demonstrates matching technologies, stacks, and relevant development experience for the required skills (${job.requiredSkills.join(", ")}), the ATS resumeScore MUST accurately reflect high match (92% - 98%).
+- Only assign a score below the 90% cutoff if key required technical skills are completely absent or mismatched.
+- Provide a fair, realistic, and highly accurate ATS breakdown.
 
 ====================
 TARGET JOB POSTING
 ====================
 Title: ${job.title}
 Required Skills: ${job.requiredSkills.join(", ")}
-Resume Cutoff Score: ${job.resumeCutoff}%
-GitHub Cutoff: ${job.githubCutoff}%
+Resume Cutoff Score: ${job.resumeCutoff || 90}%
+GitHub Cutoff: ${job.githubCutoff || 80}%
 Job Description: ${job.description}
 
 ====================
 CANDIDATE SUBMISSION
 ====================
 Name: ${candidate.name}
-Resume Text / Bio:
+Resume / Experience Summary:
 ${candidate.resumeText}
 
 GitHub Profile / Repositories:
 ${candidate.githubUrl}
 
-Project Details:
+Project Summary & Architecture:
 ${candidate.projectDetails}
 
 ====================
-EVALUATION INSTRUCTIONS
+REQUIRED JSON OUTPUT SCHEMA
 ====================
-1. ATS RESUME MATCH (0-100):
-   - Calculate resumeScore based on keyword density, depth of experience in required skills, and demonstrable outcomes.
-   - Break down into roleAlignment (0-100), skillsMatch (0-100), projectImpact (0-100), formatting (0-100).
-   - Identify matchedKeywords and missingKeywords. Provide 2-3 actionable suggestions.
+{
+  "resumeScore": <number between 0 and 100. If skills match the job, score must be >= 90 (e.g. 92-96). If skills mismatch, score < 90>,
+  "atsBreakdown": {
+    "roleAlignment": <number 0-100>,
+    "skillsMatch": <number 0-100>,
+    "projectImpact": <number 0-100>,
+    "formatting": <number 0-100>,
+    "missingKeywords": [<list of missing tech skills if any, or empty array if strong match>],
+    "actionableSuggestions": [<2-3 concrete suggestions to improve ATS compatibility>]
+  },
+  "matchedKeywords": [<list of matched skills found in resume>],
+  "missingKeywords": [<list of missing skills from job requirement>],
+  "resumeFeedback": <clear 1-2 sentence summary of resume ATS fit>,
+  "authenticityPercentage": <number 75-96 for verified human code, or lower if boilerplate detected>,
+  "aiWrittenPercentage": <100 - authenticityPercentage>,
+  "githubFeedback": <evaluation of GitHub repository code quality and commit depth>,
+  "codeSignals": [<3 technical signals like "Modular repository pattern", "Verified domain assertions", "Clean commit lineage">],
+  "generatedMCQs": [
+    {
+      "id": 1,
+      "question": <technical scenario question based on candidate GitHub repo tech stack>,
+      "options": [<option A>, <option B>, <option C>, <option D>],
+      "correctIndex": <0-3>,
+      "topic": <topic name>,
+      "repoSource": <repo filename like "server/auth_middleware.ts">,
+      "rationale": <why the correct answer is right>
+    },
+    // ... exactly 5 total MCQs
+  ],
+  "repoCodingChallenges": [
+    {
+      "id": 1,
+      "title": <challenge title based on candidate stack>,
+      "repoContext": <e.g. "Derived from candidate repo / data_pipeline.ts">,
+      "problemStatement": <clear problem statement with input/output description>,
+      "starterCode": <valid starter function template>,
+      "testCases": [
+        { "input": <sample input>, "expectedOutput": <sample expected output> },
+        { "input": <sample input 2>, "expectedOutput": <sample expected output 2> }
+      ]
+    },
+    {
+      "id": 2,
+      "title": <second practical challenge>,
+      "repoContext": <context>,
+      "problemStatement": <problem statement>,
+      "starterCode": <starter function template>,
+      "testCases": [
+        { "input": <input 1>, "expectedOutput": <output 1> },
+        { "input": <input 2>, "expectedOutput": <output 2> }
+      ]
+    }
+  ],
+  "hrEvidence": {
+    "overallRecommendation": "Strong Hire" | "Hire with Coaching" | "Consider" | "Needs Further Technical Evaluation",
+    "summary": <concise summary for HR recruiter>,
+    "strengths": [<2-3 key strengths>],
+    "areasToVerify": [<1-2 technical areas for live interview>],
+    "decisionNotes": <screening decision note>
+  }
+}
 
-2. GITHUB & CODE AUTHENTICITY:
-   - Estimate authenticityPercentage (e.g. 75-95% for solid human code) and aiWrittenPercentage (100 - authenticityPercentage).
-   - Extract 3 technical codeSignals.
-
-3. 5 PERSONALIZED MCQS:
-   - Generate 5 deep technical multiple-choice questions tailored to the candidate's exact repository stacks and job requirements.
-   - Include 4 options, the 0-indexed correctIndex, topic, repoSource file name, and rationale.
-
-4. 2 REPO-DERIVED PRACTICAL CODING CHALLENGES:
-   - Create 2 algorithmic/engineering challenges reflecting candidate's stack with starterCode and 2 testCases.
-
-5. DYNAMIC AI INTERVIEW DIALOGUE:
-   - Generate 3 turns of conversational technical probing with question, realistic candidateAnswer, AI evaluation, knowledge demonstrated, boundaries detected, and adaptive follow-up.
-
-6. SKILL MAP & IMPROVEMENT PLAN:
-   - 4-6 categorized skills with statuses ("Demonstrated" | "Developing" | "Needs Improvement").
-   - 3 prioritized improvement items (High, Medium, Low) with concrete recommendations and suggested actions.
-
-7. HR EVIDENCE SYNTHESIS:
-   - overallRecommendation ("Strong Hire" | "Hire with Coaching" | "Consider" | "Needs Further Technical Evaluation").
-   - summary, strengths, areasToVerify, decisionNotes.
-
-Respond ONLY with a valid JSON object without markdown fences or additional commentary.`;
+Respond ONLY with the JSON object. No Markdown code fences or extra text.`;
 
   const models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-flash-latest", "gemini-3.8-flash"];
 

@@ -32,8 +32,8 @@ export const BeforeInterviewCandidatePanel = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
   
-  // 6 Candidate-facing tabs matching the landing page 7-stage engine
-  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "scorecard">("ats");
+  // 4 Core Candidate-facing screening stages
+  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa">("ats");
 
   // MCQ interactive state
   const [selectedMCQAnswers, setSelectedMCQAnswers] = useState<Record<number, number>>({});
@@ -59,6 +59,18 @@ export const BeforeInterviewCandidatePanel = () => {
         initialCodes[c.id] = c.submittedCode || c.starterCode;
       });
       setCodeInputs(initialCodes);
+
+      // Restore MCQ answers if already submitted
+      if (activeApp.mcqScore !== undefined) {
+        setMcqSubmitted(true);
+        const ansMap: Record<number, number> = {};
+        activeApp.generatedMCQs?.forEach((q) => {
+          if (q.userAnswer !== undefined) {
+            ansMap[q.id] = q.userAnswer;
+          }
+        });
+        setSelectedMCQAnswers(ansMap);
+      }
     }
 
     if (loadedJobs.length > 0 && !selectedJobId) {
@@ -74,17 +86,20 @@ export const BeforeInterviewCandidatePanel = () => {
   const activeJob = jobs.find((j) => j.id === (currentApp?.jobId || selectedJobId)) || jobs[0];
   const currentChallenge = currentApp?.repoCodingChallenges?.[activeChallengeIdx] || currentApp?.repoCodingChallenges?.[0];
 
-  const isRejected = currentApp ? currentApp.currentStage === "rejected" || currentApp.overallStatus.startsWith("Auto-Rejected") : false;
-  const isApproved = currentApp ? !isRejected && (currentApp.resumePassed && currentApp.githubPassed && currentApp.projectPassed) : false;
+  const resumeCutoffScore = activeJob?.resumeCutoff || 90;
+  const isResumePassed = currentApp ? currentApp.resumeScore >= resumeCutoffScore && currentApp.resumePassed : false;
+  const isGithubPassed = currentApp ? isResumePassed && currentApp.githubPassed && currentApp.authenticityPercentage >= 70 : false;
+  const isMCQPassed = currentApp ? isGithubPassed && (mcqSubmitted || currentApp.mcqScore !== undefined) : false;
+
+  const isRejected = currentApp ? currentApp.currentStage === "rejected" || currentApp.overallStatus.startsWith("Auto-Rejected") || !isResumePassed : false;
+  const isApproved = currentApp ? isResumePassed && isGithubPassed && isMCQPassed : false;
   const isAlreadyInMainRounds = currentApp ? ["shortlisted", "aptitude_test", "dsa_sandbox", "interview"].includes(currentApp.currentStage) || currentApp.overallStatus === "Interview Ready" : false;
 
   const tabs = [
-    { id: "ats", label: "ATS & Resume", icon: FileText, num: "01" },
-    { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02" },
-    { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03" },
-    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04" },
-    { id: "interview", label: "Dynamic AI Interview", icon: Bot, num: "05" },
-    { id: "scorecard", label: "Skill Map & Plan", icon: Award, num: "06" },
+    { id: "ats", label: "ATS & Resume", icon: FileText, num: "01", locked: false },
+    { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02", locked: !isResumePassed },
+    { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03", locked: !isGithubPassed },
+    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04", locked: !isMCQPassed },
   ];
 
   const handleMCQSelect = (questionId: number, optionIdx: number) => {
@@ -96,15 +111,31 @@ export const BeforeInterviewCandidatePanel = () => {
     if (!currentApp || !currentApp.generatedMCQs.length) return;
     setMcqSubmitted(true);
     let correctCount = 0;
-    currentApp.generatedMCQs.forEach((q) => {
-      if (selectedMCQAnswers[q.id] === q.correctIndex) {
+    const updatedMCQs = currentApp.generatedMCQs.map((q) => {
+      const selected = selectedMCQAnswers[q.id];
+      if (selected === q.correctIndex) {
         correctCount++;
       }
+      return { ...q, userAnswer: selected };
     });
+
+    const updatedApps = applications.map((a) => {
+      if (a.id === currentApp.id) {
+        return {
+          ...a,
+          generatedMCQs: updatedMCQs,
+          mcqScore: correctCount,
+        };
+      }
+      return a;
+    });
+
+    setApplications(updatedApps);
+    saveWorkflowApplications(updatedApps);
 
     toast({
       title: `MCQ Evaluation: ${correctCount} / ${currentApp.generatedMCQs.length} Correct`,
-      description: "Your personalized repository verification answers have been recorded in your dossier.",
+      description: "Your answers have been verified by AI and saved to your candidate dossier.",
     });
   };
 
@@ -550,22 +581,24 @@ export const BeforeInterviewCandidatePanel = () => {
               <div className="p-5 rounded-2xl bg-destructive/10 border-2 border-destructive/30 space-y-2 text-xs">
                 <div className="flex items-center gap-2 text-destructive font-semibold text-sm">
                   <AlertCircle className="w-5 h-5" />
-                  <span>Application Not Shortlisted in Before Interview Screening</span>
+                  <span>Application Auto-Rejected in Before Interview Screening</span>
                 </div>
-                <p className="text-destructive leading-relaxed">
+                <p className="text-destructive leading-relaxed font-medium">
                   <strong>Rejection Explanation: </strong>
-                  {currentApp.resumeRejectionReason || currentApp.githubRejectionReason || "Application did not meet the required cutoff standards for this role."}
+                  {!isResumePassed
+                    ? `Resume ATS match score (${currentApp.resumeScore}/100) is below the required ${resumeCutoffScore}% cutoff for ${currentApp.jobTitle}. Candidate cannot proceed to GitHub, MCQs, or Adaptive DSA stages.`
+                    : currentApp.resumeRejectionReason || currentApp.githubRejectionReason || "Application did not meet the required cutoff standards for this role."}
                 </p>
-                <div className="pt-2 text-ink-soft flex items-center gap-2">
-                  <span className="font-semibold text-ink">Action Required: </span>
-                  <span>Review your <strong>Skill Map &amp; Personalized Improvement Plan</strong> under Tab 06 to enhance your profile for future roles.</span>
+                <div className="pt-1 text-ink-soft flex items-center gap-2">
+                  <span className="font-semibold text-ink">Status: </span>
+                  <span>Pipeline locked at Stage {!isResumePassed ? "01 (ATS Resume)" : !isGithubPassed ? "02 (GitHub & Code Authenticity)" : "03 (MCQs)"}.</span>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* 6 Stage Navigation Tabs */}
+        {/* 4 Stage Navigation Tabs */}
         {currentApp && (
           <>
             <div className="border-b border-ink/10 bg-paper overflow-x-auto scrollbar-none">
@@ -573,19 +606,37 @@ export const BeforeInterviewCandidatePanel = () => {
                 {tabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
+                  const isLocked = tab.locked;
                   return (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id as any)}
-                      className={`flex items-center gap-2 py-4 px-4 text-xs font-medium border-b-2 transition-all ${
+                      onClick={() => {
+                        if (isLocked) {
+                          toast({
+                            title: `🔒 Stage ${tab.num} Locked`,
+                            description: tab.id === "github"
+                              ? `Requires an ATS Resume score of at least ${resumeCutoffScore}% to unlock.`
+                              : tab.id === "mcq"
+                              ? "Requires passing ATS Resume and GitHub Code Authenticity stages to unlock."
+                              : "Requires completing and submitting Stage 03 (5 Personalized MCQs) to unlock.",
+                            variant: "destructive",
+                          });
+                        } else {
+                          setActiveTab(tab.id as any);
+                        }
+                      }}
+                      className={`flex items-center gap-2 py-4 px-4 text-xs font-medium border-b-2 transition-all relative ${
                         isActive
                           ? "border-forest text-forest font-semibold"
+                          : isLocked
+                          ? "border-transparent text-ink-muted/60 hover:text-ink-muted cursor-not-allowed"
                           : "border-transparent text-ink-soft hover:text-ink hover:border-ink/20"
                       }`}
                     >
                       <span className="font-mono text-[10px] text-ink-muted">{tab.num}</span>
                       <Icon className="w-4 h-4" />
                       <span>{tab.label}</span>
+                      {isLocked && <Lock className="w-3 h-3 text-ink-muted/70 ml-0.5" />}
                     </button>
                   );
                 })}
@@ -810,83 +861,97 @@ export const BeforeInterviewCandidatePanel = () => {
                     transition={{ duration: 0.3 }}
                     className="space-y-6"
                   >
-                    <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
-                      <span className="text-ink-soft">
-                        Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
-                      </span>
-                      {!mcqSubmitted ? (
-                        <Button
-                          onClick={handleMCQSubmit}
-                          disabled={Object.keys(selectedMCQAnswers).length < currentApp.generatedMCQs.length}
-                          className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
-                        >
-                          Submit {currentApp.generatedMCQs.length} MCQs
-                        </Button>
-                      ) : (
-                        <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
-                          Assessment Completed
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="space-y-4">
-                      {currentApp.generatedMCQs.map((q, idx) => (
-                        <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper hover:border-forest/40 transition-colors">
-                          <div className="flex items-start justify-between gap-4 mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-forest text-paper text-xs font-mono font-semibold grid place-items-center shrink-0">
-                                {idx + 1}
-                              </span>
-                              <span className="text-xs font-mono font-medium text-forest uppercase tracking-wider">{q.topic}</span>
-                            </div>
-                            <span className="text-[10px] font-mono text-ink-muted border border-ink/10 px-2 py-0.5 rounded-full hidden sm:inline">
-                              Source: {q.repoSource}
+                    {!isGithubPassed ? (
+                      <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                        <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
+                          <Lock className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 03 Locked: GitHub Screening Required</h4>
+                        <p className="text-xs text-ink-soft max-w-md mx-auto">
+                          You must clear Stage 01 (ATS Resume $\ge 90\%$) and Stage 02 (GitHub Code Authenticity) to unlock your 5 personalized MCQs.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
+                          <span className="text-ink-soft">
+                            Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
+                          </span>
+                          {!mcqSubmitted ? (
+                            <Button
+                              onClick={handleMCQSubmit}
+                              disabled={Object.keys(selectedMCQAnswers).length < currentApp.generatedMCQs.length}
+                              className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
+                            >
+                              Submit {currentApp.generatedMCQs.length} MCQs
+                            </Button>
+                          ) : (
+                            <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
+                              Score: {currentApp.mcqScore ?? Object.keys(selectedMCQAnswers).length} / {currentApp.generatedMCQs.length} Correct ✓
                             </span>
-                          </div>
-
-                          <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
-
-                          <div className="grid gap-2 pl-8">
-                            {q.options.map((opt, optIdx) => {
-                              const isSelected = selectedMCQAnswers[q.id] === optIdx;
-                              const isCorrect = optIdx === q.correctIndex;
-                              return (
-                                <button
-                                  key={optIdx}
-                                  disabled={mcqSubmitted}
-                                  onClick={() => handleMCQSelect(q.id, optIdx)}
-                                  className={`p-2.5 rounded-xl text-xs flex items-start gap-2.5 text-left transition-all ${
-                                    mcqSubmitted
-                                      ? isCorrect
-                                        ? "bg-forest/10 border border-forest/30 text-ink font-medium"
-                                        : isSelected
-                                        ? "bg-destructive/10 border border-destructive/30 text-destructive"
-                                        : "bg-paper-2 text-ink-soft border border-ink/5"
-                                      : isSelected
-                                      ? "bg-forest text-paper border border-forest font-semibold"
-                                      : "bg-paper-2 text-ink-soft hover:bg-ink/5 border border-ink/5"
-                                  }`}
-                                >
-                                  <span className="font-mono shrink-0 w-4 font-semibold">{String.fromCharCode(65 + optIdx)}.</span>
-                                  <span className="flex-1">{opt}</span>
-                                  {mcqSubmitted && isCorrect && (
-                                    <span className="ml-auto text-[10px] font-mono uppercase bg-forest text-paper px-1.5 py-0.5 rounded shrink-0">
-                                      Verified Correct
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {mcqSubmitted && (
-                            <div className="mt-3 pl-8 text-xs text-ink-muted italic border-t border-ink/5 pt-2">
-                              <strong>AI Rationale:</strong> {q.rationale}
-                            </div>
                           )}
                         </div>
-                      ))}
-                    </div>
+
+                        <div className="space-y-4">
+                          {currentApp.generatedMCQs.map((q, idx) => (
+                            <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper hover:border-forest/40 transition-colors">
+                              <div className="flex items-start justify-between gap-4 mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-6 h-6 rounded-full bg-forest text-paper text-xs font-mono font-semibold grid place-items-center shrink-0">
+                                    {idx + 1}
+                                  </span>
+                                  <span className="text-xs font-mono font-medium text-forest uppercase tracking-wider">{q.topic}</span>
+                                </div>
+                                <span className="text-[10px] font-mono text-ink-muted border border-ink/10 px-2 py-0.5 rounded-full hidden sm:inline">
+                                  Source: {q.repoSource}
+                                </span>
+                              </div>
+
+                              <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
+
+                              <div className="grid gap-2 pl-8">
+                                {q.options.map((opt, optIdx) => {
+                                  const isSelected = selectedMCQAnswers[q.id] === optIdx || q.userAnswer === optIdx;
+                                  const isCorrect = optIdx === q.correctIndex;
+                                  return (
+                                    <button
+                                      key={optIdx}
+                                      disabled={mcqSubmitted}
+                                      onClick={() => handleMCQSelect(q.id, optIdx)}
+                                      className={`p-2.5 rounded-xl text-xs flex items-start gap-2.5 text-left transition-all ${
+                                        mcqSubmitted
+                                          ? isCorrect
+                                            ? "bg-forest/10 border border-forest/30 text-ink font-medium"
+                                            : isSelected
+                                            ? "bg-destructive/10 border border-destructive/30 text-destructive"
+                                            : "bg-paper-2 text-ink-soft border border-ink/5"
+                                          : isSelected
+                                          ? "bg-forest text-paper border border-forest font-semibold"
+                                          : "bg-paper-2 text-ink-soft hover:bg-ink/5 border border-ink/5"
+                                      }`}
+                                    >
+                                      <span className="font-mono shrink-0 w-4 font-semibold">{String.fromCharCode(65 + optIdx)}.</span>
+                                      <span className="flex-1">{opt}</span>
+                                      {mcqSubmitted && isCorrect && (
+                                        <span className="ml-auto text-[10px] font-mono uppercase bg-forest text-paper px-1.5 py-0.5 rounded shrink-0">
+                                          Verified Correct
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {mcqSubmitted && (
+                                <div className="mt-3 pl-8 text-xs text-ink-muted italic border-t border-ink/5 pt-2">
+                                  <strong>AI Rationale:</strong> {q.rationale}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </motion.div>
                 )}
 
@@ -900,265 +965,150 @@ export const BeforeInterviewCandidatePanel = () => {
                     transition={{ duration: 0.3 }}
                     className="space-y-6"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink/10 pb-4">
-                      <div>
-                        <h4 className="font-serif-display text-xl text-ink">Adaptive DSA Sandbox — Practical Repo-Derived Challenges</h4>
-                        <p className="text-xs text-ink-soft mt-0.5">
-                          Extracted from your repository architecture with live AI error diagnosis and time complexity verification.
+                    {!isMCQPassed ? (
+                      <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                        <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-700 grid place-items-center mx-auto">
+                          <Lock className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 04 Locked: Submit 5 MCQs First</h4>
+                        <p className="text-xs text-ink-soft max-w-md mx-auto">
+                          Please complete and submit Stage 03 (5 Personalized MCQs) to unlock your Adaptive DSA Sandbox Coding Challenges.
                         </p>
+                        <Button onClick={() => setActiveTab("mcq")} className="bg-forest text-paper hover:bg-forest/90 text-xs mt-2">
+                          Go to Stage 03 (5 MCQs) →
+                        </Button>
                       </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink/10 pb-4">
+                          <div>
+                            <h4 className="font-serif-display text-xl text-ink">Adaptive DSA Sandbox — Practical Repo-Derived Challenges</h4>
+                            <p className="text-xs text-ink-soft mt-0.5">
+                              Extracted from your repository architecture with live AI error diagnosis and time complexity verification.
+                            </p>
+                          </div>
 
-                      {/* Challenge Switcher */}
-                      <div className="flex bg-paper-2 p-1 rounded-xl border border-ink/10 gap-1 self-start sm:self-center">
-                        {currentApp.repoCodingChallenges.map((c, i) => (
-                          <button
-                            key={c.id}
-                            onClick={() => setActiveChallengeIdx(i)}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                              activeChallengeIdx === i ? "bg-ink text-paper font-semibold" : "text-ink hover:bg-ink/5"
-                            }`}
-                          >
-                            Challenge {i + 1}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {currentChallenge && (
-                      <div className="grid lg:grid-cols-12 gap-6">
-                        {/* Left: Problem Statement & Test Cases */}
-                        <div className="lg:col-span-5 space-y-4">
-                          <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono text-xs font-bold text-forest uppercase">
-                                Challenge {activeChallengeIdx + 1}
-                              </span>
-                              <span className="text-[10px] font-mono text-ink-muted bg-paper px-2 py-0.5 rounded border border-ink/10">
-                                {currentChallenge.repoContext}
-                              </span>
-                            </div>
-                            <h4 className="font-serif-display text-lg text-ink font-semibold">{currentChallenge.title}</h4>
-                            <p className="text-xs text-ink-soft leading-relaxed">{currentChallenge.problemStatement}</p>
-
-                            <div className="pt-2 border-t border-ink/10">
-                              <span className="text-[11px] font-semibold text-ink block mb-1.5">Verification Test Cases:</span>
-                              <div className="space-y-1.5">
-                                {currentChallenge.testCases.map((tc, idx) => (
-                                  <div key={idx} className="p-2 rounded-lg bg-paper border border-ink/5 text-[11px] font-mono">
-                                    <div className="text-ink-soft">Input: <span className="text-ink">{tc.input}</span></div>
-                                    <div className="text-forest font-semibold">Expected: {tc.expectedOutput}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
+                          {/* Challenge Switcher */}
+                          <div className="flex bg-paper-2 p-1 rounded-xl border border-ink/10 gap-1 self-start sm:self-center">
+                            {currentApp.repoCodingChallenges.map((c, i) => (
+                              <button
+                                key={c.id}
+                                onClick={() => setActiveChallengeIdx(i)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                                  activeChallengeIdx === i ? "bg-ink text-paper font-semibold" : "text-ink hover:bg-ink/5"
+                                }`}
+                              >
+                                Challenge {i + 1}
+                              </button>
+                            ))}
                           </div>
                         </div>
 
-                        {/* Right: Code Editor & AI Review */}
-                        <div className="lg:col-span-7 space-y-4">
-                          <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-mono font-semibold text-ink flex items-center gap-1.5">
-                                <Terminal className="w-3.5 h-3.5 text-forest" /> Code Editor (Repo-Derived Module)
-                              </span>
-                              <Button
-                                size="sm"
-                                onClick={() => handleRunCodeAnalysis(currentChallenge.id)}
-                                disabled={analyzingChallengeId === currentChallenge.id}
-                                className="bg-forest text-paper hover:bg-forest/90 text-xs h-8 px-3 rounded-full flex items-center gap-1.5"
-                              >
-                                <Play className="w-3 h-3" />
-                                {analyzingChallengeId === currentChallenge.id ? "Analyzing with AI..." : "Run Code & AI Review"}
-                              </Button>
-                            </div>
-
-                            <textarea
-                              value={codeInputs[currentChallenge.id] ?? (currentChallenge.submittedCode || currentChallenge.starterCode)}
-                              onChange={(e) => setCodeInputs((prev) => ({ ...prev, [currentChallenge.id]: e.target.value }))}
-                              rows={9}
-                              className="w-full font-mono text-xs p-4 rounded-xl bg-ink text-paper border border-ink-soft focus:outline-none focus:ring-1 focus:ring-forest leading-relaxed resize-none"
-                              placeholder="// Write your code here..."
-                            />
-
-                            {/* AI Error Feedback */}
-                            {currentChallenge.aiCodeReview && (
-                              <motion.div
-                                initial={{ opacity: 0, y: 8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className={`p-4 rounded-xl border text-xs space-y-2 ${
-                                  currentChallenge.aiCodeReview.passed
-                                    ? "bg-forest/10 border-forest/30 text-forest"
-                                    : "bg-destructive/10 border-destructive/30 text-destructive"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between font-semibold">
-                                  <span className="flex items-center gap-1.5">
-                                    {currentChallenge.aiCodeReview.passed ? (
-                                      <CheckCircle2 className="w-4 h-4 text-forest" />
-                                    ) : (
-                                      <AlertCircle className="w-4 h-4 text-destructive" />
-                                    )}
-                                    AI Diagnostic: {currentChallenge.aiCodeReview.feedback}
+                        {currentChallenge && (
+                          <div className="grid lg:grid-cols-12 gap-6">
+                            {/* Left: Problem Statement & Test Cases */}
+                            <div className="lg:col-span-5 space-y-4">
+                              <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-xs font-bold text-forest uppercase">
+                                    Challenge {activeChallengeIdx + 1}
                                   </span>
-                                  <span className="font-mono text-[10px]">
-                                    Complexity: {currentChallenge.aiCodeReview.efficiencyRating}
+                                  <span className="text-[10px] font-mono text-ink-muted bg-paper px-2 py-0.5 rounded border border-ink/10">
+                                    {currentChallenge.repoContext}
                                   </span>
                                 </div>
+                                <h4 className="font-serif-display text-lg text-ink font-semibold">{currentChallenge.title}</h4>
+                                <p className="text-xs text-ink-soft leading-relaxed">{currentChallenge.problemStatement}</p>
 
-                                {currentChallenge.aiCodeReview.errorsDetected.length > 0 && (
-                                  <div className="space-y-1 pt-1 border-t border-destructive/20 font-mono text-[11px]">
-                                    {currentChallenge.aiCodeReview.errorsDetected.map((err, i) => (
-                                      <div key={i} className="flex items-start gap-1">
-                                        <Bug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                                        <span>{err}</span>
+                                <div className="pt-2 border-t border-ink/10">
+                                  <span className="text-[11px] font-semibold text-ink block mb-1.5">Verification Test Cases:</span>
+                                  <div className="space-y-1.5">
+                                    {currentChallenge.testCases.map((tc, idx) => (
+                                      <div key={idx} className="p-2 rounded-lg bg-paper border border-ink/5 text-[11px] font-mono">
+                                        <div className="text-ink-soft">Input: <span className="text-ink">{tc.input}</span></div>
+                                        <div className="text-forest font-semibold">Expected: {tc.expectedOutput}</div>
                                       </div>
                                     ))}
                                   </div>
-                                )}
-
-                                {currentChallenge.aiCodeReview.fixSuggestion && (
-                                  <div className="text-[11px] text-ink-soft bg-paper/70 p-2.5 rounded-lg border border-ink/5 mt-1 font-mono">
-                                    <strong>AI Fix Suggestion: </strong> {currentChallenge.aiCodeReview.fixSuggestion}
-                                  </div>
-                                )}
-                              </motion.div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-
-                {/* TAB 5: DYNAMIC AI INTERVIEW */}
-                {activeTab === "interview" && (
-                  <motion.div
-                    key={currentApp.id + "-interview"}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 text-xs text-ink-soft">
-                      <strong className="text-ink">Conversational Probing Logic: </strong>
-                      The AI does not follow a static script. It identifies technical assertions from your responses and crafts adaptive follow-ups to probe detected knowledge boundaries.
-                    </div>
-
-                    <div className="space-y-4">
-                      {currentApp.aiInterviewDialogue.map((turn) => (
-                        <div key={turn.turn} className="p-5 rounded-2xl border border-ink/10 bg-paper space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono text-xs font-semibold text-forest uppercase tracking-wider">
-                              Turn {turn.turn} · {turn.topic}
-                            </span>
-                            <span className="text-[11px] font-mono text-ink-muted">
-                              Confidence: {(turn.aiEvaluation.confidence * 100).toFixed(0)}%
-                            </span>
-                          </div>
-
-                          <div className="flex items-start gap-3 bg-paper-2 p-3.5 rounded-xl border border-ink/10">
-                            <Bot className="w-4 h-4 text-forest shrink-0 mt-0.5" />
-                            <div className="text-xs">
-                              <span className="font-semibold text-ink">AI Interviewer: </span>
-                              <span className="text-ink-soft">{turn.question}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-3 bg-forest/5 p-3.5 rounded-xl border border-forest/15">
-                            <div className="w-5 h-5 rounded-full bg-forest text-paper text-[10px] font-mono grid place-items-center shrink-0 mt-0.5">
-                              {currentApp.candidateName.charAt(0)}
-                            </div>
-                            <div className="text-xs">
-                              <span className="font-semibold text-ink">{currentApp.candidateName}: </span>
-                              <span className="text-ink-soft leading-relaxed">{turn.candidateAnswer}</span>
-                            </div>
-                          </div>
-
-                          <div className="p-3 rounded-xl bg-ink/5 border border-ink/10 text-xs space-y-1">
-                            <div className="text-ink font-medium">AI Realtime Evaluation:</div>
-                            <div className="text-ink-soft">✓ {turn.aiEvaluation.demonstratedKnowledge}</div>
-                            {turn.aiEvaluation.gapFound && (
-                              <div className="text-amber-800">⚠ Boundary: {turn.aiEvaluation.gapFound}</div>
-                            )}
-                            <div className="text-forest font-mono text-[11px] pt-1">
-                              ↳ Dynamic Follow-up: "{turn.aiEvaluation.adaptiveFollowUp}"
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* TAB 6: SKILL MAP & IMPROVEMENT PLAN */}
-                {activeTab === "scorecard" && (
-                  <motion.div
-                    key={currentApp.id + "-scorecard"}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.3 }}
-                    className="space-y-6"
-                  >
-                    {/* Skill Map */}
-                    <div>
-                      <h4 className="font-serif-display text-xl text-ink mb-1">Candidate Transparent Skill Map</h4>
-                      <p className="text-xs text-ink-soft mb-4">
-                        Transparent multi-tier assessment showing exactly which skills were demonstrated, currently developing, or need further verification.
-                      </p>
-
-                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {currentApp.skillMap.map((s) => {
-                          let badgeClass = "bg-emerald-500/10 text-emerald-700 border-emerald-500/30";
-                          if (s.status === "Developing") badgeClass = "bg-blue-500/10 text-blue-700 border-blue-500/30";
-                          if (s.status === "Needs Improvement") badgeClass = "bg-amber-500/10 text-amber-700 border-amber-500/30";
-                          if (s.status === "Not Assessed") badgeClass = "bg-zinc-500/10 text-zinc-600 border-zinc-500/20";
-
-                          return (
-                            <div key={s.skill} className="p-4 rounded-xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
-                              <div>
-                                <div className="flex items-center justify-between gap-2 mb-1.5">
-                                  <span className="font-semibold text-xs text-ink">{s.skill}</span>
-                                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-semibold ${badgeClass}`}>
-                                    {s.status}
-                                  </span>
                                 </div>
-                                <div className="text-[10px] font-mono text-ink-muted uppercase mb-2">{s.category}</div>
                               </div>
-                              <p className="text-[11px] text-ink-soft leading-relaxed border-t border-ink/5 pt-2">
-                                {s.evidenceNote}
-                              </p>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
 
-                    {/* Improvement Plan */}
-                    <div className="p-6 rounded-2xl border border-ink/10 bg-paper">
-                      <h4 className="font-serif-display text-lg text-ink mb-1">Personalized Improvement Plan</h4>
-                      <p className="text-xs text-ink-soft mb-4">
-                        HireZap empowers candidates with high-yield next steps derived from detected assessment gaps.
-                      </p>
+                            {/* Right: Code Editor & AI Review */}
+                            <div className="lg:col-span-7 space-y-4">
+                              <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-semibold text-ink flex items-center gap-1.5">
+                                    <Terminal className="w-3.5 h-3.5 text-forest" /> Code Editor (Repo-Derived Module)
+                                  </span>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleRunCodeAnalysis(currentChallenge.id)}
+                                    disabled={analyzingChallengeId === currentChallenge.id}
+                                    className="bg-forest text-paper hover:bg-forest/90 text-xs h-8 px-3 rounded-full flex items-center gap-1.5"
+                                  >
+                                    <Play className="w-3 h-3" />
+                                    {analyzingChallengeId === currentChallenge.id ? "Analyzing with AI..." : "Run Code & AI Review"}
+                                  </Button>
+                                </div>
 
-                      <div className="space-y-3">
-                        {currentApp.improvementPlan.map((plan, i) => (
-                          <div key={i} className="p-4 rounded-xl border border-ink/10 bg-paper-2 text-xs space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-ink">{plan.area}</span>
-                              <span className="font-mono text-[10px] uppercase font-bold text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded">
-                                {plan.priority} Priority
-                              </span>
-                            </div>
-                            <div className="text-ink-soft">{plan.recommendation}</div>
-                            <div className="text-forest font-mono text-[11px] pt-1">
-                              Suggested Action: {plan.suggestedAction}
+                                <textarea
+                                  value={codeInputs[currentChallenge.id] ?? (currentChallenge.submittedCode || currentChallenge.starterCode)}
+                                  onChange={(e) => setCodeInputs((prev) => ({ ...prev, [currentChallenge.id]: e.target.value }))}
+                                  rows={9}
+                                  className="w-full font-mono text-xs p-4 rounded-xl bg-ink text-paper border border-ink-soft focus:outline-none focus:ring-1 focus:ring-forest leading-relaxed resize-none"
+                                  placeholder="// Write your code here..."
+                                />
+
+                                {/* AI Error Feedback */}
+                                {currentChallenge.aiCodeReview && (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className={`p-4 rounded-xl border text-xs space-y-2 ${
+                                      currentChallenge.aiCodeReview.passed
+                                        ? "bg-forest/10 border-forest/30 text-forest"
+                                        : "bg-destructive/10 border-destructive/30 text-destructive"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between font-semibold">
+                                      <span className="flex items-center gap-1.5">
+                                        {currentChallenge.aiCodeReview.passed ? (
+                                          <CheckCircle2 className="w-4 h-4 text-forest" />
+                                        ) : (
+                                          <AlertCircle className="w-4 h-4 text-destructive" />
+                                        )}
+                                        AI Diagnostic: {currentChallenge.aiCodeReview.feedback}
+                                      </span>
+                                      <span className="font-mono text-[10px]">
+                                        Complexity: {currentChallenge.aiCodeReview.efficiencyRating}
+                                      </span>
+                                    </div>
+
+                                    {currentChallenge.aiCodeReview.errorsDetected.length > 0 && (
+                                      <div className="space-y-1 pt-1 border-t border-destructive/20 font-mono text-[11px]">
+                                        {currentChallenge.aiCodeReview.errorsDetected.map((err, i) => (
+                                          <div key={i} className="flex items-start gap-1">
+                                            <Bug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                            <span>{err}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {currentChallenge.aiCodeReview.fixSuggestion && (
+                                      <div className="text-[11px] text-ink-soft bg-paper/70 p-2.5 rounded-lg border border-ink/5 mt-1 font-mono">
+                                        <strong>AI Fix Suggestion: </strong> {currentChallenge.aiCodeReview.fixSuggestion}
+                                      </div>
+                                    )}
+                                  </motion.div>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                        )}
+                      </>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>

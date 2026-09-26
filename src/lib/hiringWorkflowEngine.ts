@@ -610,15 +610,20 @@ export function evaluateAndSubmitApplication(
   const missing = job.requiredSkills.filter((s) => !textLower.includes(s.toLowerCase()));
 
   const matchRatio = reqSkills.length > 0 ? matched.length / reqSkills.length : 1;
-  const calculatedResumeScore = Math.min(
-    100,
-    Math.round(matchRatio * 80 + (candidateData.resumeText.length > 40 ? 18 : 5))
-  );
-  const resumePassed = calculatedResumeScore >= job.resumeCutoff;
+  let calculatedResumeScore = 50;
+  if (matchRatio >= 0.99) {
+    calculatedResumeScore = Math.min(98, 92 + (candidateData.resumeText.length > 40 ? 5 : 2));
+  } else if (matchRatio >= 0.75) {
+    calculatedResumeScore = Math.round(85 + matchRatio * 10);
+  } else {
+    calculatedResumeScore = Math.round(matchRatio * 75 + 10);
+  }
+  const cutoff = job.resumeCutoff || 90;
+  const resumePassed = calculatedResumeScore >= cutoff;
 
   const resumeRejectionReason = resumePassed
     ? undefined
-    : `Auto-Rejected: Resume ATS score (${calculatedResumeScore}/100) is below the required ${job.resumeCutoff}% cutoff for ${job.title}. Missing required skills: ${missing.join(", ")}.`;
+    : `Auto-Rejected: Resume ATS score (${calculatedResumeScore}/100) is below the required ${cutoff}% cutoff for ${job.title}. Missing required skills: ${missing.join(", ")}.`;
 
   // 2. Calculate GitHub Code & AI Authenticity (0-100)
   const repo1Lower = candidateData.githubRepo1.toLowerCase();
@@ -627,14 +632,15 @@ export function evaluateAndSubmitApplication(
   const repoMatchesStack = reqSkills.some(
     (s) => repo1Lower.includes(s) || repo2Lower.includes(s) || textLower.includes(s)
   );
-  const calculatedGithubScore = repoMatchesStack ? Math.min(95, calculatedResumeScore + 5) : 42;
-  const aiWrittenPct = repoMatchesStack ? 15 : 55;
+  const calculatedGithubScore = repoMatchesStack ? Math.min(96, Math.max(88, calculatedResumeScore)) : 42;
+  const aiWrittenPct = repoMatchesStack ? 12 : 55;
   const authenticityPct = 100 - aiWrittenPct;
-  const githubPassed = calculatedGithubScore >= job.githubCutoff && authenticityPct >= 70;
+  const githubCutoff = job.githubCutoff || 80;
+  const githubPassed = calculatedGithubScore >= githubCutoff && authenticityPct >= 70;
 
   const githubRejectionReason = githubPassed
     ? undefined
-    : `Auto-Rejected: GitHub code quality score (${calculatedGithubScore}/100) or authentic code percentage (${authenticityPct}%) did not meet the required cutoff (${job.githubCutoff}%). High AI boilerplate detected.`;
+    : `Auto-Rejected: GitHub code quality score (${calculatedGithubScore}/100) or authentic code percentage (${authenticityPct}%) did not meet the required cutoff (${githubCutoff}%). High AI boilerplate detected.`;
 
   // 3. Project Validation Score
   const projectScore = candidateData.projectSummary.length > 25 && (candidateData.projectUrl || "").length > 5 ? 88 : 50;
