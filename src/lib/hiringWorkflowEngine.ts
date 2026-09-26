@@ -44,6 +44,8 @@ export interface RepoCodingChallenge {
 
 export interface CandidateApplicationSubmission {
   id: string;
+  candidateId?: string;
+  applicationId?: string;
   jobId: string;
   jobTitle: string;
   candidateName: string;
@@ -648,11 +650,38 @@ export function checkSkillMatch(skill: string, textLower: string): boolean {
 }
 
 /**
+ * Ensure any URL or GitHub username/repo format is turned into a safe, valid external link
+ */
+export function formatExternalUrl(url?: string): string {
+  if (!url) return "#";
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === "#") return "#";
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("github.com/")) {
+    return `https://${trimmed}`;
+  }
+  if (trimmed.startsWith("www.")) {
+    return `https://${trimmed}`;
+  }
+  if (!trimmed.includes(".") && !trimmed.includes("/")) {
+    return `https://github.com/${trimmed}`;
+  }
+  if (trimmed.includes("/") && !trimmed.includes(".")) {
+    return `https://github.com/${trimmed}`;
+  }
+  return `https://${trimmed}`;
+}
+
+/**
  * Process a new candidate application submission strictly against a real posted job's cutoffs & skills
  */
 export function evaluateAndSubmitApplication(
   job: JobCutoffs,
   candidateData: {
+    candidateId?: string;
+    applicationId?: string;
     name: string;
     email: string;
     resumeFileName: string;
@@ -694,8 +723,8 @@ export function evaluateAndSubmitApplication(
   const repo1Lower = candidateData.githubRepo1.toLowerCase();
   const repo2Lower = (candidateData.githubRepo2 || "").toLowerCase();
 
-  const repoMatchesStack = reqSkills.some(
-    (s) => repo1Lower.includes(s) || repo2Lower.includes(s) || textLower.includes(s)
+  const repoMatchesStack = job.requiredSkills.some(
+    (s) => checkSkillMatch(s, repo1Lower) || checkSkillMatch(s, repo2Lower) || checkSkillMatch(s, textLower)
   );
   const calculatedGithubScore = repoMatchesStack ? Math.min(96, Math.max(88, calculatedResumeScore)) : 42;
   const aiWrittenPct = repoMatchesStack ? 12 : 55;
@@ -766,7 +795,9 @@ export function evaluateAndSubmitApplication(
   }
 
   const newApp: CandidateApplicationSubmission = {
-    id: `app-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    id: candidateData.applicationId || `app-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    candidateId: candidateData.candidateId,
+    applicationId: candidateData.applicationId,
     jobId: job.id,
     jobTitle: job.title,
     candidateName: candidateData.name,
@@ -834,6 +865,8 @@ export function evaluateAndSubmitApplication(
 export async function evaluateAndSubmitApplicationWithGemini(
   job: JobCutoffs,
   candidateData: {
+    candidateId?: string;
+    applicationId?: string;
     name: string;
     email: string;
     resumeFileName: string;
@@ -898,7 +931,9 @@ export async function evaluateAndSubmitApplicationWithGemini(
       }
 
       const newApp: CandidateApplicationSubmission = {
-        id: `app-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: candidateData.applicationId || `app-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        candidateId: candidateData.candidateId,
+        applicationId: candidateData.applicationId,
         jobId: job.id,
         jobTitle: job.title,
         candidateName: candidateData.name,

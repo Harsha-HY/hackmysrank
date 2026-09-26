@@ -362,8 +362,37 @@ Portfolio: ${(profile as any)?.portfolio_url || "https://portfolio.dev"}
       addWorkflowJob(workflowJob);
     }
 
+    // Save application to Supabase database
+    const { data: insertedApplication, error } = await supabase
+      .from("applications")
+      .insert({
+        candidate_id: userData.id,
+        job_id: job.id,
+        current_company: derivedCompany,
+        current_ctc: derivedCurrentCtc,
+        expected_ctc: parseFloat(expectedCtc) || 0,
+        notice_period: derivedNotice,
+        experience_years: derivedExpYears,
+        resume_url: resumePath,
+        photo_url: photoUrl,
+        cover_letter: composedCover || null,
+        current_stage: "before_interview",
+        status: "active",
+        resume_score: null,
+      })
+      .select("id")
+      .single();
+
+    if (error || !insertedApplication) {
+      toast({ title: "Submission failed", description: error?.message || "Could not save application", variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+
     // Evaluate application against real cutoffs with Gemini AI, generating 5 MCQs and 2 Repo Coding Challenges
     const evaluatedApp = await evaluateAndSubmitApplicationWithGemini(workflowJob, {
+      candidateId: userData.id,
+      applicationId: insertedApplication.id,
       name: userData.full_name || "Applicant",
       email: session.user.email || "",
       resumeFileName: resumeFile ? resumeFile.name : (useBuilt ? "HireZap_Built_Resume.pdf" : "Resume.pdf"),
@@ -378,31 +407,15 @@ Portfolio: ${(profile as any)?.portfolio_url || "https://portfolio.dev"}
     const initialStage = evaluatedApp.currentStage === "rejected" ? "rejected" : "before_interview";
     const initialStatus = evaluatedApp.currentStage === "rejected" ? "rejected" : "active";
 
-    const { data: insertedApplication, error } = await supabase
+    // Update the application record with the analyzed ATS resume score and stage
+    await supabase
       .from("applications")
-      .insert({
-        candidate_id: userData.id,
-        job_id: job.id,
-        current_company: derivedCompany,
-        current_ctc: derivedCurrentCtc,
-        expected_ctc: parseFloat(expectedCtc) || 0,
-        notice_period: derivedNotice,
-        experience_years: derivedExpYears,
-        resume_url: resumePath,
-        photo_url: photoUrl,
-        cover_letter: composedCover || null,
+      .update({
+        resume_score: evaluatedApp.resumeScore,
         current_stage: initialStage,
         status: initialStatus,
-        resume_score: evaluatedApp.resumeScore,
       })
-      .select("id")
-      .single();
-
-    if (error || !insertedApplication) {
-      toast({ title: "Submission failed", description: error?.message || "Could not save application", variant: "destructive" });
-      setLoading(false);
-      return;
-    }
+      .eq("id", insertedApplication.id);
 
     // Instant notification to HR (and assigned Manager) on every application
     try {

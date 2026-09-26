@@ -17,7 +17,8 @@ import {
   JobCutoffs,
   simulateCandidateApplicationForJob,
   deleteWorkflowJob,
-  clearAllWorkflowData
+  clearAllWorkflowData,
+  formatExternalUrl
 } from "@/lib/hiringWorkflowEngine";
 import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
 import { supabase } from "@/integrations/supabase/client";
@@ -55,10 +56,16 @@ export const BeforeInterviewHRPanel = () => {
 
   const filteredApps = applications.filter((app) => {
     const matchesJob = selectedJobId === "all" || app.jobId === selectedJobId;
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return matchesJob;
     const matchesSearch =
-      app.candidateName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.candidateEmail.toLowerCase().includes(searchQuery.toLowerCase());
+      app.candidateName.toLowerCase().includes(q) ||
+      app.jobTitle.toLowerCase().includes(q) ||
+      app.candidateEmail.toLowerCase().includes(q) ||
+      (app.githubAccountUrl || "").toLowerCase().includes(q) ||
+      (app.githubRepo1Url || "").toLowerCase().includes(q) ||
+      (app.githubRepo2Url || "").toLowerCase().includes(q) ||
+      (app.detectedRepoStacks || []).some((s) => s.toLowerCase().includes(q));
     return matchesJob && matchesSearch;
   });
 
@@ -729,11 +736,44 @@ export const BeforeInterviewHRPanel = () => {
                               </span>
                               <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
                             </div>
-                            <div className="space-y-1.5 mb-3 font-mono text-xs">
-                              <div>👤 Profile: <a href={currentApp.githubAccountUrl} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubAccountUrl}</a></div>
-                              <div>📦 Repo 1: <a href={currentApp.githubRepo1Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo1Url}</a></div>
+                            <div className="space-y-2 mb-3 font-mono text-xs">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>👤 Profile:</span>
+                                <a
+                                  href={formatExternalUrl(currentApp.githubAccountUrl)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
+                                >
+                                  <span>{currentApp.githubAccountUrl}</span>
+                                  <ExternalLink className="w-3 h-3 shrink-0" />
+                                </a>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>📦 Repo 1:</span>
+                                <a
+                                  href={formatExternalUrl(currentApp.githubRepo1Url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
+                                >
+                                  <span>{currentApp.githubRepo1Url}</span>
+                                  <ExternalLink className="w-3 h-3 shrink-0" />
+                                </a>
+                              </div>
                               {currentApp.githubRepo2Url && (
-                                <div>📦 Repo 2: <a href={currentApp.githubRepo2Url} target="_blank" rel="noreferrer" className="underline text-forest">{currentApp.githubRepo2Url}</a></div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>📦 Repo 2:</span>
+                                  <a
+                                    href={formatExternalUrl(currentApp.githubRepo2Url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
+                                  >
+                                    <span>{currentApp.githubRepo2Url}</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
+                                  </a>
+                                </div>
                               )}
                             </div>
                             
@@ -771,7 +811,12 @@ export const BeforeInterviewHRPanel = () => {
 
                           {currentApp.projectLiveUrl && (
                             <div className="pt-3 border-t border-ink/10 text-xs">
-                              <a href={currentApp.projectLiveUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-forest font-semibold hover:underline">
+                              <a
+                                href={formatExternalUrl(currentApp.projectLiveUrl)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-forest font-semibold hover:underline"
+                              >
                                 <ExternalLink className="w-3.5 h-3.5" /> View Live Project Deployment
                               </a>
                             </div>
