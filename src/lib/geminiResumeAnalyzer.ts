@@ -3,6 +3,26 @@
  * Uses Google Gemini API with multimodal / structured JSON evaluation.
  */
 
+export interface InspectedCodeLine {
+  lineNum: number;
+  code: string;
+  isAi: boolean;
+  annotation?: string;
+}
+
+export interface InspectedCodeFile {
+  id: string;
+  fileName: string;
+  language: string;
+  repoSource: string;
+  humanPercentage: number;
+  aiPercentage: number;
+  totalLines: number;
+  summary: string;
+  signals: string[];
+  lines: InspectedCodeLine[];
+}
+
 export interface GeminiAnalysisResult {
   resumeScore: number;
   atsBreakdown: {
@@ -20,6 +40,7 @@ export interface GeminiAnalysisResult {
   aiWrittenPercentage: number;
   githubFeedback: string;
   codeSignals: string[];
+  inspectedCodeFiles?: InspectedCodeFile[];
   generatedMCQs: {
     id: number;
     question: string;
@@ -139,6 +160,36 @@ REQUIRED JSON OUTPUT SCHEMA
   "aiWrittenPercentage": <100 - authenticityPercentage>,
   "githubFeedback": <evaluation of GitHub repository code quality and commit depth>,
   "codeSignals": [<3 technical signals like "Modular repository pattern", "Verified domain assertions", "Clean commit lineage">],
+  "inspectedCodeFiles": [
+    {
+      "id": "file-1",
+      "fileName": "src/services/auth_validator.ts",
+      "language": "typescript",
+      "repoSource": "candidate-repo",
+      "humanPercentage": 88,
+      "aiPercentage": 12,
+      "totalLines": 18,
+      "summary": "Core authentication token validation and rate limiting logic.",
+      "signals": ["Custom token expiration handling", "Manual Redis cache lookup", "Zero boilerplate duplication"],
+      "lines": [
+        { "lineNum": 1, "code": "import { Request, Response, NextFunction } from 'express';", "isAi": true, "annotation": "Standard framework import boilerplate" },
+        { "lineNum": 2, "code": "import { verifyToken, decodeClaims } from '../lib/crypto';", "isAi": false, "annotation": "Domain crypto module link" },
+        { "lineNum": 3, "code": "export async function authValidator(req: Request, res: Response, next: NextFunction) {", "isAi": true, "annotation": "Middleware handler signature" },
+        { "lineNum": 4, "code": "  const authHeader = req.headers['authorization'];", "isAi": false, "annotation": "Direct header extraction" },
+        { "lineNum": 5, "code": "  if (!authHeader || !authHeader.startsWith('Bearer ')) {", "isAi": false, "annotation": "Strict boundary verification" },
+        { "lineNum": 6, "code": "    return res.status(401).json({ error: 'Missing or malformed Authorization header' });", "isAi": false, "annotation": "Explicit security rejection" },
+        { "lineNum": 7, "code": "  }", "isAi": false, "annotation": "" },
+        { "lineNum": 8, "code": "  const token = authHeader.split(' ')[1];", "isAi": false, "annotation": "Token slice logic" },
+        { "lineNum": 9, "code": "  const claims = await verifyToken(token);", "isAi": false, "annotation": "Cryptographic payload resolution" },
+        { "lineNum": 10, "code": "  if (!claims || claims.exp < Date.now() / 1000) {", "isAi": false, "annotation": "Custom epoch expiry check" },
+        { "lineNum": 11, "code": "    return res.status(403).json({ error: 'Token expired or invalid signature' });", "isAi": false, "annotation": "Security guard rail" },
+        { "lineNum": 12, "code": "  }", "isAi": false, "annotation": "" },
+        { "lineNum": 13, "code": "  (req as any).user = claims;", "isAi": true, "annotation": "Context attachment boilerplate" },
+        { "lineNum": 14, "code": "  return next();", "isAi": false, "annotation": "Pipeline handover" },
+        { "lineNum": 15, "code": "}", "isAi": false, "annotation": "" }
+      ]
+    }
+  ],
   "generatedMCQs": [
     {
       "id": 1,

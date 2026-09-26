@@ -30,6 +30,7 @@ import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } fr
 import { supabase } from "@/integrations/supabase/client";
 import { useLiveData } from "@/hooks/useLiveData";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import GitHubCodeInspector from "@/components/common/GitHubCodeInspector";
 
 export const BeforeInterviewHRContent = () => {
   const { toast } = useToast();
@@ -242,6 +243,12 @@ export const BeforeInterviewHRContent = () => {
     { id: "skillmap", label: "Skill Map & Plan", icon: Award, num: "06", locked: !isResumePassed },
     { id: "hrevidence", label: "HR Evidence Decision", icon: ShieldCheck, num: "07", locked: false },
   ];
+
+  const handleApplicationUpdate = (updatedApp: CandidateApplicationSubmission) => {
+    const updated = applications.map((a) => (a.id === updatedApp.id ? updatedApp : a));
+    setApplications(updated);
+    saveWorkflowApplications(updated);
+  };
 
   const handleAdvanceToInterview = async (app: CandidateApplicationSubmission) => {
     const updated = applications.map((a) =>
@@ -1158,114 +1165,12 @@ export const BeforeInterviewHRContent = () => {
                       </p>
                     </div>
                   ) : (
-                    <>
-                      {/* AI Code Authenticity Meter */}
-                      <div className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-3 shadow-sm">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Ratio</span>
-                          <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Logic</span>
-                        </div>
-                        <div className="w-full h-3 rounded-full bg-amber-200 overflow-hidden flex">
-                          <div
-                            className="bg-emerald-600 h-full transition-all"
-                            style={{ width: `${currentApp.authenticityPercentage}%` }}
-                          />
-                          <div
-                            className="bg-amber-500 h-full transition-all"
-                            style={{ width: `${currentApp.aiWrittenPercentage}%` }}
-                          />
-                        </div>
-                        <div className="flex justify-between text-[11px] font-mono text-ink-muted">
-                          <span>{currentApp.authenticityPercentage}% Human Logic</span>
-                          <span>{currentApp.aiWrittenPercentage}% AI Boilerplate</span>
-                        </div>
-                      </div>
-
-                      <div className="grid md:grid-cols-2 gap-6">
-                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper flex flex-col justify-between shadow-sm">
-                          <div>
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <span className="font-mono font-semibold text-sm text-ink flex items-center gap-1.5">
-                                <GitBranch className="w-3.5 h-3.5 text-forest" />
-                                Submitted Repositories &amp; Profile
-                              </span>
-                              <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
-                            </div>
-
-                            <div className="space-y-2 text-xs text-ink-soft mb-4 font-mono">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-semibold text-amber-800">👤 Profile:</span>
-                                <a
-                                  href={formatExternalUrl(currentApp.githubAccountUrl)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
-                                >
-                                  <span>{currentApp.githubAccountUrl}</span>
-                                  <ExternalLink className="w-3 h-3 shrink-0" />
-                                </a>
-                              </div>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span>📦 Repo 1:</span>
-                                <a
-                                  href={formatExternalUrl(currentApp.githubRepo1Url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
-                                >
-                                  <span>{currentApp.githubRepo1Url}</span>
-                                  <ExternalLink className="w-3 h-3 shrink-0" />
-                                </a>
-                              </div>
-                            </div>
-                            
-                            <div className="text-[11px] font-semibold text-ink mb-1.5">Detected Code Signals:</div>
-                            <ul className="space-y-1 mb-4 text-xs text-ink-soft">
-                              {(currentApp.codeSignals || []).map((sig, i) => (
-                                <li key={i} className="flex items-start gap-1.5">
-                                  <span className="text-forest shrink-0">▸</span>
-                                  <span>{sig}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="pt-3 border-t border-ink/10 text-xs">
-                            <span className="font-semibold text-ink">Authenticity Status: </span>
-                            <span className={currentApp.githubPassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>
-                              {currentApp.githubPassed ? "Verified Human Engineering" : "High AI Boilerplate"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Project Architecture */}
-                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper flex flex-col justify-between shadow-sm">
-                          <div>
-                            <h4 className="font-semibold text-sm text-ink mb-2 flex items-center gap-2">
-                              <Layers className="w-4 h-4 text-forest" />
-                              Extracted Project Architecture ({currentApp.projectValidationScore}/100)
-                            </h4>
-                            <p className="text-xs text-ink-soft mb-3">{currentApp.projectArchitectureSummary || currentApp.projectFeedback}</p>
-                            <div className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto mb-3">
-                              {currentApp.projectArchitectureDetected}
-                            </div>
-                          </div>
-
-                          {currentApp.projectLiveUrl && (
-                            <div className="pt-3 border-t border-ink/10 text-xs">
-                              <a
-                                href={formatExternalUrl(currentApp.projectLiveUrl)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-forest font-semibold hover:underline"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" /> View Live Project Deployment
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </>
+                    <GitHubCodeInspector
+                      application={currentApp}
+                      job={activeJob}
+                      isHRView={true}
+                      onApplicationUpdate={handleApplicationUpdate}
+                    />
                   )}
                 </motion.div>
               )}
