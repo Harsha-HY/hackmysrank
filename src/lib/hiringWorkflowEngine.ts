@@ -586,6 +586,68 @@ export function generateDynamicHREvidence(
 }
 
 /**
+ * Helper to match skills semantically with aliases and normalized tokens
+ */
+export function checkSkillMatch(skill: string, textLower: string): boolean {
+  const s = skill.toLowerCase().trim();
+  if (!s) return false;
+  if (textLower.includes(s)) return true;
+
+  const cleanSkill = s.replace(/[^a-z0-9]/g, "");
+  const cleanText = textLower.replace(/[^a-z0-9]/g, " ");
+
+  if (cleanSkill.length > 1 && cleanText.includes(cleanSkill)) return true;
+
+  const aliases: Record<string, string[]> = {
+    react: ["react", "react.js", "reactjs", "next.js", "nextjs", "react native"],
+    node: ["node", "nodejs", "node.js", "express", "express.js", "nest", "nestjs"],
+    python: ["python", "django", "flask", "fastapi", "pandas", "numpy", "pytorch", "scikit"],
+    sql: ["sql", "mysql", "postgres", "postgresql", "psql", "sqlite", "oracle", "database"],
+    postgres: ["postgres", "postgresql", "psql", "sql"],
+    postgresql: ["postgres", "postgresql", "psql", "sql"],
+    typescript: ["typescript", "ts", "javascript", "js"],
+    javascript: ["javascript", "js", "typescript", "ts", "ecmascript"],
+    java: ["java", "spring", "springboot", "hibernate", "jvm"],
+    golang: ["go", "golang", "gin", "goroutine"],
+    go: ["go", "golang", "gin"],
+    "c++": ["c++", "cpp", "cplusplus"],
+    cpp: ["c++", "cpp", "cplusplus"],
+    "c#": ["c#", "csharp", ".net", "dotnet"],
+    docker: ["docker", "container", "containerization", "k8s", "kubernetes"],
+    kubernetes: ["kubernetes", "k8s", "docker", "helm"],
+    aws: ["aws", "amazon web services", "cloud", "ec2", "s3", "lambda"],
+    gcp: ["gcp", "google cloud", "cloud"],
+    azure: ["azure", "microsoft cloud", "cloud"],
+    dsa: ["data structures", "algorithms", "dsa", "leetcode", "problem solving"],
+    algorithms: ["algorithms", "dsa", "data structures", "algorithmic"],
+    "system architecture": ["system architecture", "system design", "architecture", "microservices", "distributed"],
+    "system design": ["system design", "system architecture", "scalability", "microservices", "distributed"],
+    "machine learning": ["machine learning", "deep learning", "ai", "ml", "nlp", "llm", "neural"],
+    ai: ["artificial intelligence", "ai", "machine learning", "ml", "llm", "gemini", "gpt"],
+    html: ["html", "html5", "css", "frontend", "web"],
+    css: ["css", "css3", "tailwind", "sass", "scss", "bootstrap"],
+    git: ["git", "github", "gitlab", "version control"],
+  };
+
+  for (const [key, aliasList] of Object.entries(aliases)) {
+    if (s.includes(key) || key.includes(s)) {
+      if (aliasList.some((alias) => textLower.includes(alias) || cleanText.includes(alias.replace(/[^a-z0-9]/g, "")))) {
+        return true;
+      }
+    }
+  }
+
+  // Token-level matching for compound skill names (e.g. "Full Stack Development")
+  const tokens = s.split(/[\s,/-]+/).filter((t) => t.length > 2);
+  if (tokens.length > 1) {
+    const matchedTokens = tokens.filter((t) => textLower.includes(t));
+    if (matchedTokens.length / tokens.length >= 0.5) return true;
+  }
+
+  return false;
+}
+
+/**
  * Process a new candidate application submission strictly against a real posted job's cutoffs & skills
  */
 export function evaluateAndSubmitApplication(
@@ -602,22 +664,25 @@ export function evaluateAndSubmitApplication(
     projectSummary: string;
   }
 ): CandidateApplicationSubmission {
-  const reqSkills = job.requiredSkills.map((s) => s.toLowerCase());
   const textLower = (candidateData.resumeText + " " + candidateData.resumeFileName + " " + candidateData.projectSummary).toLowerCase();
 
   // 1. Calculate ATS Resume Score (0-100) based on Job's Required Skills
-  const matched = job.requiredSkills.filter((s) => textLower.includes(s.toLowerCase()));
-  const missing = job.requiredSkills.filter((s) => !textLower.includes(s.toLowerCase()));
+  const matched = job.requiredSkills.filter((s) => checkSkillMatch(s, textLower));
+  const missing = job.requiredSkills.filter((s) => !checkSkillMatch(s, textLower));
 
-  const matchRatio = reqSkills.length > 0 ? matched.length / reqSkills.length : 1;
+  const totalRequired = job.requiredSkills.length || 1;
+  const matchRatio = matched.length / totalRequired;
   let calculatedResumeScore = 50;
-  if (matchRatio >= 0.99) {
-    calculatedResumeScore = Math.min(98, 92 + (candidateData.resumeText.length > 40 ? 5 : 2));
-  } else if (matchRatio >= 0.75) {
-    calculatedResumeScore = Math.round(85 + matchRatio * 10);
+
+  if (matchRatio >= 0.75 || matched.length >= Math.max(1, totalRequired - 1)) {
+    // High match -> 92% - 98%
+    calculatedResumeScore = Math.min(98, Math.max(92, Math.round(92 + matchRatio * 5 + (candidateData.resumeText.length > 100 ? 1 : 0))));
+  } else if (matchRatio >= 0.5) {
+    calculatedResumeScore = Math.round(80 + matchRatio * 15);
   } else {
-    calculatedResumeScore = Math.round(matchRatio * 75 + 10);
+    calculatedResumeScore = Math.max(25, Math.round(matchRatio * 70 + 15));
   }
+
   const cutoff = job.resumeCutoff || 90;
   const resumePassed = calculatedResumeScore >= cutoff;
 

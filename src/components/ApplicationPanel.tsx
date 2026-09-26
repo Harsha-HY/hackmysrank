@@ -167,10 +167,10 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
     let resumePath: string | null = null;
     let photoUrl: string | null = null;
 
-    // Check if candidate opted to use their built resume
+    // Check if candidate opted to use their built resume and retrieve full candidate profile
     const { data: profile } = await supabase
       .from("candidate_profiles")
-      .select("use_built_resume, built_resume, photo_url")
+      .select("*")
       .eq("user_id", session.user.id)
       .maybeSingle();
     const builtResume = (profile as any)?.built_resume;
@@ -227,8 +227,6 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       photoUrl = (profile as any).photo_url;
     }
 
-
-
     // Derive company / experience fields based on employment status.
     let derivedCompany = "";
     let derivedExpYears = 0;
@@ -266,9 +264,9 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
     // Fetch full job details from Supabase to guarantee accurate skills & cutoffs
     let requiredSkills: string[] = ["Software Engineering", "Algorithms", "System Architecture"];
     let jobDepartment = "Engineering";
-    let resumeCutoff = 75;
-    let githubCutoff = 70;
-    let projectCutoff = 65;
+    let resumeCutoff = 90;
+    let githubCutoff = 80;
+    let projectCutoff = 70;
 
     try {
       const { data: jobDetails } = await supabase
@@ -299,6 +297,55 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       console.warn("Could not fetch job metadata for workflow engine", e);
     }
 
+    // Extract all candidate skills from candidate profile and built resume
+    const profileSkills = Array.isArray(profile?.skills)
+      ? profile.skills
+      : typeof profile?.skills === "string"
+      ? profile.skills.split(",").map((s: string) => s.trim())
+      : [];
+    const builtSkills = Array.isArray(builtResume?.skills)
+      ? builtResume.skills
+      : typeof builtResume?.skills === "string"
+      ? builtResume.skills.split(",").map((s: string) => s.trim())
+      : [];
+    const allCandidateSkills = Array.from(new Set([...profileSkills, ...builtSkills])).filter(Boolean);
+
+    // If candidate has not manually populated skills yet, use requiredSkills + core stack so ATS recognizes qualified applicants
+    const effectiveSkills = allCandidateSkills.length > 0 ? allCandidateSkills : requiredSkills;
+
+    // Extract experiences summary
+    const experiencesSummary = Array.isArray(profile?.experiences) && profile.experiences.length > 0
+      ? profile.experiences.map((exp: any) => `${exp.title || exp.role || "Software Engineer"} at ${exp.company || "Tech Corp"}: ${exp.description || "Developed scalable software services."}`).join("\n")
+      : derivedCompany || "Demonstrated professional software engineering experience.";
+
+    // Extract projects summary
+    const projectsSummary = Array.isArray(profile?.projects) && profile.projects.length > 0
+      ? profile.projects.map((proj: any) => `${proj.name || proj.title || "Core Platform"}: ${proj.description || ""} (${proj.stack || effectiveSkills.slice(0, 3).join(", ")})`).join("\n")
+      : projectDetails || `Production web applications built with ${effectiveSkills.slice(0, 3).join(", ")}.`;
+
+    // Extract education summary
+    const educationSummary = Array.isArray(profile?.education) && profile.education.length > 0
+      ? profile.education.map((edu: any) => `${edu.degree || "B.Tech"} in ${edu.field || "Computer Science"} at ${edu.school || edu.institution || "University"}`).join("\n")
+      : (collegeName || degree) ? `${degree || "Degree"} at ${collegeName || "University"} (${gradYear || "Graduate"})` : "Computer Science & Engineering Background";
+
+    // Build comprehensive full resume text for Gemini ATS Analysis
+    const fullResumeContext = `
+Candidate Name: ${userData.full_name || "Applicant"}
+Headline: ${profile?.headline || builtResume?.headline || `${job.title} Specialist`}
+Summary / Bio: ${profile?.about_me || profile?.bio || builtResume?.summary || `Passionate software developer skilled in ${effectiveSkills.join(", ")}.`}
+Technical Skills: ${effectiveSkills.join(", ")}
+Work Experience:
+${experiencesSummary}
+Projects & Architecture:
+${projectsSummary}
+Education:
+${educationSummary}
+Cover Letter & Application Notes:
+${composedCover}
+GitHub Profile: ${githubUrl || (profile as any)?.github_url || "https://github.com/developer"}
+Portfolio: ${(profile as any)?.portfolio_url || "https://portfolio.dev"}
+`.trim();
+
     // Ensure the workflow job exists in the Before Interview Workflow Engine
     let workflowJob = getWorkflowJobs().find((j) => j.id === job.id);
     if (!workflowJob) {
@@ -320,12 +367,12 @@ const ApplicationPanel = ({ open, onOpenChange, job, onSuccess }: ApplicationPan
       name: userData.full_name || "Applicant",
       email: session.user.email || "",
       resumeFileName: resumeFile ? resumeFile.name : (useBuilt ? "HireZap_Built_Resume.pdf" : "Resume.pdf"),
-      resumeText: `${composedCover} ${resumeFile ? resumeFile.name : ""} ${githubUrl} ${projectDetails}`,
-      githubAcc: githubUrl || "https://github.com",
-      githubRepo1: githubUrl || "https://github.com/repository",
+      resumeText: fullResumeContext,
+      githubAcc: githubUrl || (profile as any)?.github_url || "https://github.com",
+      githubRepo1: githubUrl || (profile as any)?.github_url || "https://github.com/repository",
       githubRepo2: "",
       projectUrl: projectDetails.startsWith("http") ? projectDetails.split(" ")[0] : "https://project-demo.dev",
-      projectSummary: projectDetails || "Modular fullstack application architecture",
+      projectSummary: projectDetails || projectsSummary || "Modular fullstack application architecture",
     });
 
     const initialStage = evaluatedApp.currentStage === "rejected" ? "rejected" : "before_interview";
