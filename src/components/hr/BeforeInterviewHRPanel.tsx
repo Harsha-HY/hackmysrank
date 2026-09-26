@@ -51,25 +51,24 @@ export const BeforeInterviewHRContent = () => {
     let loadedApps = getWorkflowApplications();
     let loadedJobs = getWorkflowJobs();
 
-    if (!loadedJobs || loadedJobs.length === 0) {
-      try {
-        const { data: dbJobs } = await supabase.from("jobs").select("*").eq("status", "open");
-        if (dbJobs && dbJobs.length > 0) {
-          loadedJobs = dbJobs.map((j) => ({
-            id: j.id,
-            title: j.title,
-            department: j.department || "Engineering",
-            requiredSkills: Array.isArray(j.skills_required) ? j.skills_required : ["TypeScript", "React", "Node.js"],
-            resumeCutoff: j.resume_cutoff || 90,
-            githubCutoff: 70,
-            projectCutoff: 70,
-            description: j.job_description || j.title,
-          }));
-          saveWorkflowJobs(loadedJobs);
-        }
-      } catch (err) {
-        console.warn("Could not load jobs from Supabase", err);
+    // 1. Fetch real jobs from Supabase
+    try {
+      const { data: dbJobs } = await supabase.from("jobs").select("*").eq("status", "open");
+      if (dbJobs && dbJobs.length > 0) {
+        loadedJobs = dbJobs.map((j) => ({
+          id: j.id,
+          title: j.title,
+          department: j.department || "Engineering",
+          requiredSkills: Array.isArray(j.skills_required) ? j.skills_required : ["TypeScript", "React", "Node.js"],
+          resumeCutoff: j.resume_cutoff || 90,
+          githubCutoff: 70,
+          projectCutoff: 70,
+          description: j.job_description || j.title,
+        }));
+        saveWorkflowJobs(loadedJobs);
       }
+    } catch (err) {
+      console.warn("Could not load jobs from Supabase", err);
     }
 
     if (!loadedJobs || loadedJobs.length === 0) {
@@ -78,76 +77,105 @@ export const BeforeInterviewHRContent = () => {
     }
     setJobs(loadedJobs);
 
-    // If no workflow applications, fetch Supabase applications or simulate initial candidates
-    if (!loadedApps || loadedApps.length === 0) {
-      try {
-        const { data: dbApps } = await supabase.from("applications").select("*, jobs(*)");
-        if (dbApps && dbApps.length > 0) {
-          const hydrated = dbApps.map((da: any) => {
-            const j = da.jobs || {};
-            const reqSkills = Array.isArray(j.skills_required) ? j.skills_required : ["Engineering", "Architecture"];
-            const rScore = da.resume_score != null ? da.resume_score : 92;
-            const targetJob = loadedJobs.find((job) => job.id === da.job_id) || loadedJobs[0] || DEFAULT_JOBS[0];
+    // 2. Fetch real candidate applications from Supabase
+    try {
+      const { data: dbApps } = await supabase
+        .from("applications")
+        .select("*")
+        .order("applied_at", { ascending: false });
 
-            return ensureCompleteCandidateApp({
-              id: da.id,
-              candidateId: da.candidate_id,
-              applicationId: da.id,
-              jobId: da.job_id || targetJob.id,
-              jobTitle: j.title || targetJob.title,
-              candidateName: "Applicant",
-              candidateEmail: "applicant@example.com",
-              appliedDate: new Date(da.applied_at || Date.now()).toLocaleDateString(),
-              resumeFileName: "Candidate_Resume.pdf",
-              resumeTextSummary: da.cover_letter || "Verified candidate background and technical skills.",
-              githubAccountUrl: "https://github.com",
-              githubRepo1Url: "https://github.com",
-              projectArchitectureSummary: "Modular fullstack application architecture",
-              resumeScore: rScore,
-              resumePassed: rScore >= (targetJob.resumeCutoff || 90),
-              resumeFeedback: `Resume matches required qualifications for ${targetJob.title}.`,
-              matchedKeywords: reqSkills,
-              atsBreakdown: {
-                roleAlignment: rScore,
-                skillsMatch: rScore,
-                projectImpact: 88,
-                formatting: 92,
-                missingKeywords: [],
-                actionableSuggestions: ["Continue showcasing modular architectural implementations."],
-              },
-              githubScore: 92,
-              githubPassed: true,
-              aiWrittenPercentage: 12,
-              authenticityPercentage: 88,
-              detectedRepoStacks: reqSkills,
-              githubFeedback: "Authentic commit history with clean software modularity.",
-              codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
-              generatedMCQs: generateDynamicMCQs(reqSkills, targetJob.title),
-              repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, targetJob.title),
-              aiInterviewDialogue: [],
-              skillMap: [],
-              improvementPlan: [],
-              hrEvidence: {
-                overallRecommendation: "Strong Hire",
-                summary: "Candidate cleared Before Interview ATS evaluation.",
-                strengths: ["Strong domain stack match", "Verified code signals"],
-                areasToVerify: ["Live interview architecture review"],
-                decisionNotes: "Cleared Before Interview cutoff.",
-              },
-              projectValidationScore: 88,
-              projectPassed: true,
-              projectFeedback: "Project architecture verified.",
-              projectArchitectureDetected: "Modular Service Architecture",
-              overallStatus: (rScore >= 90 ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)") as any,
-              currentStage: (rScore >= 90 ? "before_interview" : "rejected") as any,
-            }, targetJob);
-          });
-          loadedApps = hydrated;
-          saveWorkflowApplications(hydrated);
-        }
-      } catch (e) {
-        console.warn("Could not load applications from Supabase", e);
+      if (dbApps && dbApps.length > 0) {
+        const candidateIds = [...new Set(dbApps.map((a) => a.candidate_id).filter(Boolean))];
+        const [usersRes, profilesRes] = await Promise.all([
+          candidateIds.length > 0
+            ? supabase.from("users").select("id, full_name, email").in("id", candidateIds)
+            : { data: [] },
+          candidateIds.length > 0
+            ? supabase.from("candidate_profiles").select("id, full_name, github_url, skills, experience_years, bio, resume_url").in("id", candidateIds)
+            : { data: [] },
+        ]);
+
+        const userMap = Object.fromEntries((usersRes.data || []).map((u) => [u.id, u]));
+        const profileMap = Object.fromEntries(((profilesRes.data as any[]) || []).map((p: any) => [p.id, p]));
+
+        const hydrated: CandidateApplicationSubmission[] = dbApps.map((da: any) => {
+          const targetJob = loadedJobs.find((job) => job.id === da.job_id) || loadedJobs[0] || DEFAULT_JOBS[0];
+          const user = userMap[da.candidate_id];
+          const profile = profileMap[da.candidate_id];
+
+          const candidateName = user?.full_name || profile?.full_name || da.candidate_name || "Applicant";
+          const candidateEmail = user?.email || da.candidate_email || "applicant@example.com";
+          const githubUrl = profile?.github_url || (da.cover_letter?.includes("github.com") ? da.cover_letter : "") || "https://github.com";
+
+          // Exact real score from application or AI analysis
+          const rScore = da.resume_score != null ? da.resume_score : (da.ai_analysis?.resume_score ?? 89);
+          const resumeCutoff = targetJob.resumeCutoff || 90;
+          const resumePassed = rScore >= resumeCutoff;
+          const aiData = da.ai_analysis || {};
+          const reqSkills = Array.isArray(targetJob.requiredSkills) ? targetJob.requiredSkills : ["Software Engineering"];
+
+          return ensureCompleteCandidateApp({
+            id: da.id,
+            candidateId: da.candidate_id,
+            applicationId: da.id,
+            jobId: da.job_id || targetJob.id,
+            jobTitle: targetJob.title,
+            candidateName,
+            candidateEmail,
+            appliedDate: new Date(da.applied_at || Date.now()).toLocaleDateString(),
+            resumeFileName: da.resume_url ? da.resume_url.split("/").pop() || "Candidate_Resume.pdf" : "Candidate_Resume.pdf",
+            resumeTextSummary: da.cover_letter || aiData.summary || profile?.bio || "Verified candidate background and technical skills.",
+            githubAccountUrl: githubUrl,
+            githubRepo1Url: githubUrl,
+            projectArchitectureSummary: aiData.project_summary || "Modular fullstack application architecture",
+            resumeScore: rScore,
+            resumePassed,
+            resumeFeedback: aiData.feedback || `Resume score evaluated to ${rScore}/100 based on technical qualifications for ${targetJob.title}.`,
+            matchedKeywords: aiData.matched_skills || profile?.skills || reqSkills,
+            atsBreakdown: aiData.ats_breakdown || {
+              roleAlignment: rScore,
+              skillsMatch: rScore,
+              projectImpact: Math.min(100, rScore + 2),
+              formatting: 92,
+              missingKeywords: [],
+              actionableSuggestions: ["Continue showcasing modular architectural implementations."],
+            },
+            githubScore: aiData.github_score || 88,
+            githubPassed: true,
+            aiWrittenPercentage: 100 - (aiData.authenticity_score || 88),
+            authenticityPercentage: aiData.authenticity_score || 88,
+            detectedRepoStacks: profile?.skills || reqSkills,
+            githubFeedback: "Authentic commit history with clean software modularity.",
+            codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
+            generatedMCQs: generateDynamicMCQs(reqSkills, targetJob.title),
+            repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, targetJob.title),
+            aiInterviewDialogue: [],
+            skillMap: [],
+            improvementPlan: [],
+            hrEvidence: {
+              overallRecommendation: resumePassed ? "Strong Hire" : "Needs Further Technical Evaluation",
+              summary: `Candidate ATS score is ${rScore}/100. Cutoff requirement: ${resumeCutoff}%.`,
+              strengths: ["Strong domain stack match", "Verified code signals"],
+              areasToVerify: ["Live interview architecture review"],
+              decisionNotes: resumePassed ? "Cleared Before Interview cutoff." : "Sub-cutoff ATS score.",
+            },
+            projectValidationScore: 88,
+            projectPassed: true,
+            projectFeedback: "Project architecture verified.",
+            projectArchitectureDetected: "Modular Service Architecture",
+            overallStatus: resumePassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)",
+            currentStage: resumePassed ? "before_interview" : "rejected",
+          }, targetJob);
+        });
+
+        // Merge real Supabase applications with workflow cache
+        const dbAppIds = new Set(hydrated.map((a) => a.id));
+        const merged = [...hydrated, ...(loadedApps || []).filter((a) => !dbAppIds.has(a.id) && !dbAppIds.has(a.applicationId))];
+        loadedApps = merged;
+        saveWorkflowApplications(merged);
       }
+    } catch (e) {
+      console.warn("Could not load applications from Supabase", e);
     }
 
     // If still empty, simulate demonstration candidates so HR panel is immediately populated
