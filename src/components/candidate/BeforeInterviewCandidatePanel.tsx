@@ -4,7 +4,7 @@ import {
   FileText, GitBranch, ListChecks, Code2, Bot, Award, CheckCircle2,
   AlertCircle, Sparkles, ArrowRight, ShieldCheck, HelpCircle, ChevronRight,
   ExternalLink, Layers, Database, Cpu, Terminal, Play, Bug, Briefcase,
-  User, Check, X, RefreshCw
+  User, Check, X, RefreshCw, Lock, Zap
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,7 @@ import {
   analyzeCandidateCodeSubmission,
   simulateCandidateApplicationForJob
 } from "@/lib/hiringWorkflowEngine";
+import { supabase } from "@/integrations/supabase/client";
 
 export const BeforeInterviewCandidatePanel = () => {
   const { toast } = useToast();
@@ -24,6 +25,7 @@ export const BeforeInterviewCandidatePanel = () => {
   const [jobs, setJobs] = useState<JobCutoffs[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string>("");
   const [selectedJobId, setSelectedJobId] = useState<string>("");
+  const [advancingToNextRound, setAdvancingToNextRound] = useState(false);
   
   // 6 Candidate-facing tabs matching the landing page 7-stage engine
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "scorecard">("ats");
@@ -66,6 +68,10 @@ export const BeforeInterviewCandidatePanel = () => {
   const currentApp = applications.find((a) => a.id === selectedAppId) || (applications.length > 0 ? applications[0] : null);
   const activeJob = jobs.find((j) => j.id === (currentApp?.jobId || selectedJobId)) || jobs[0];
   const currentChallenge = currentApp?.repoCodingChallenges?.[activeChallengeIdx] || currentApp?.repoCodingChallenges?.[0];
+
+  const isRejected = currentApp ? currentApp.currentStage === "rejected" || currentApp.overallStatus.startsWith("Auto-Rejected") : false;
+  const isApproved = currentApp ? !isRejected && (currentApp.resumePassed && currentApp.githubPassed && currentApp.projectPassed) : false;
+  const isAlreadyInMainRounds = currentApp ? ["shortlisted", "aptitude_test", "dsa_sandbox", "interview"].includes(currentApp.currentStage) || currentApp.overallStatus === "Interview Ready" : false;
 
   const tabs = [
     { id: "ats", label: "ATS & Resume", icon: FileText, num: "01" },
@@ -141,6 +147,60 @@ export const BeforeInterviewCandidatePanel = () => {
     }, 500);
   };
 
+  const handleProceedToMainRounds = async () => {
+    if (!currentApp) return;
+    setAdvancingToNextRound(true);
+
+    try {
+      // 1. Update workflow engine
+      const updatedApps = applications.map((a) =>
+        a.id === currentApp.id
+          ? {
+              ...a,
+              overallStatus: "Interview Ready" as const,
+              currentStage: "dsa_sandbox" as const,
+            }
+          : a
+      );
+      setApplications(updatedApps);
+      saveWorkflowApplications(updatedApps);
+
+      // 2. Sync to Supabase
+      if (currentApp.candidateEmail) {
+        const { data: userData } = await supabase
+          .from("users")
+          .select("id")
+          .eq("email", currentApp.candidateEmail)
+          .maybeSingle();
+
+        if (userData) {
+          await supabase
+            .from("applications")
+            .update({
+              current_stage: "shortlisted",
+              status: "active",
+            })
+            .eq("candidate_id", userData.id)
+            .eq("job_id", currentApp.jobId);
+        }
+      }
+
+      toast({
+        title: "🎉 Before Interview Cleared!",
+        description: `Your application for ${currentApp.jobTitle} is now advanced to My Applications with Aptitude & Technical rounds unlocked!`,
+      });
+
+      // 3. Navigate to My Applications
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "applications" }));
+      }, 600);
+    } catch (e) {
+      console.error("Error advancing to next round:", e);
+    } finally {
+      setAdvancingToNextRound(false);
+    }
+  };
+
   const handleCreateTestCandidate = (jobToUse: JobCutoffs, pass: boolean = true) => {
     const candidateName = pass ? "Alex Rivera" : "Jordan Smith";
     const email = pass ? "alex.rivera@example.com" : "jordan.smith@example.com";
@@ -159,16 +219,16 @@ export const BeforeInterviewCandidatePanel = () => {
     setMcqSubmitted(false);
     setSelectedMCQAnswers({});
     toast({
-      title: `🎯 Profile Generated for ${jobToUse.title}`,
+      title: `🎯 Profile Evaluated for ${jobToUse.title}`,
       description: pass
-        ? "Candidate application evaluated against cutoffs with all 6 stages generated!"
-        : "Candidate evaluated with scores below cutoff to demonstrate auto-rejection explanation.",
+        ? "Candidate cleared Before Interview screening cutoffs and can proceed to next rounds!"
+        : "Candidate scored below cutoff to demonstrate transparent rejection and improvement plan guidance.",
     });
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Main Container matching Landing Page Design */}
+      {/* Top Main Container */}
       <div className="w-full rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper shadow-2xl overflow-hidden">
         {/* Top Header: Candidate Dossier Summary & Application Switcher */}
         <div className="p-6 md:p-8 bg-paper-2 border-b border-ink/10">
@@ -176,13 +236,13 @@ export const BeforeInterviewCandidatePanel = () => {
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20 mb-3">
                 <Sparkles className="w-3.5 h-3.5" />
-                Before Interview · AI Candidate Pre-Screening Dossier
+                Step 1: Before Interview Screening Layer
               </div>
               <h3 className="font-serif-display text-2xl md:text-3xl text-ink">
                 {currentApp ? `${currentApp.candidateName}'s Screening Dossier` : "Candidate Pre-Interview Screening"}
               </h3>
               <p className="text-sm text-ink-soft mt-1 max-w-xl">
-                AI dynamically evaluates your resume ATS match, inspects your GitHub repositories for code authenticity, prepares tailored MCQs, tests adaptive coding challenges, and tracks your skill progression.
+                AI evaluates your resume ATS match, scans your GitHub repositories for code authenticity, prepares tailored MCQs, tests adaptive coding challenges, and tracks your skill progression before unlocking interview rounds.
               </p>
             </div>
 
@@ -191,7 +251,7 @@ export const BeforeInterviewCandidatePanel = () => {
               <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
                 {applications.map((app) => {
                   const active = selectedAppId === app.id;
-                  const isRejected = app.currentStage === "rejected";
+                  const appRejected = app.currentStage === "rejected";
                   return (
                     <button
                       key={app.id}
@@ -226,12 +286,12 @@ export const BeforeInterviewCandidatePanel = () => {
                       </div>
                       <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
                         <span className={active ? "text-paper/80" : "text-ink-muted"}>ATS: {app.resumeScore}/100</span>
-                        <span className={`px-1.5 py-0.2 rounded ${
-                          isRejected
-                            ? "bg-destructive/20 text-destructive-foreground font-semibold"
-                            : "text-forest font-semibold"
+                        <span className={`px-1.5 py-0.2 rounded font-semibold ${
+                          appRejected
+                            ? "bg-destructive/20 text-destructive-foreground"
+                            : "text-forest"
                         }`}>
-                          {isRejected ? "Rejected" : "Screened"}
+                          {appRejected ? "Rejected" : "Screened"}
                         </span>
                       </div>
                       {active && (
@@ -253,7 +313,7 @@ export const BeforeInterviewCandidatePanel = () => {
                 <span className="text-ink-soft">{currentApp.jobTitle}</span>
                 <span className="text-ink-muted">·</span>
                 <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-semibold ${
-                  currentApp.currentStage === "rejected"
+                  isRejected
                     ? "bg-destructive/10 text-destructive border border-destructive/20"
                     : "bg-forest/10 text-forest border border-forest/20"
                 }`}>
@@ -326,6 +386,50 @@ export const BeforeInterviewCandidatePanel = () => {
           </div>
         )}
 
+        {/* Action / Next Round Transition Banner */}
+        {currentApp && (
+          <div className="p-6 bg-paper border-b border-ink/10">
+            {isApproved && (
+              <div className="p-5 rounded-2xl bg-forest/10 border-2 border-forest/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-forest font-semibold text-sm">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span>Before Interview Screening Cleared (All Cutoffs Passed)</span>
+                  </div>
+                  <p className="text-xs text-ink-soft mt-1">
+                    Your ATS score (<strong>{currentApp.resumeScore}/100</strong>) and code authenticity (<strong>{currentApp.authenticityPercentage}%</strong>) qualify you for the next stage.
+                  </p>
+                </div>
+                <Button
+                  onClick={handleProceedToMainRounds}
+                  disabled={advancingToNextRound}
+                  className="bg-forest text-paper hover:bg-forest/90 font-medium px-5 py-2.5 rounded-full text-xs shadow-md shrink-0 flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {isAlreadyInMainRounds ? "Go to My Applications (Active Rounds) →" : "Proceed to Next Round (Aptitude & Technical) →"}
+                </Button>
+              </div>
+            )}
+
+            {isRejected && (
+              <div className="p-5 rounded-2xl bg-destructive/10 border-2 border-destructive/30 space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-destructive font-semibold text-sm">
+                  <AlertCircle className="w-5 h-5" />
+                  <span>Application Not Shortlisted in Before Interview Screening</span>
+                </div>
+                <p className="text-destructive leading-relaxed">
+                  <strong>Rejection Explanation: </strong>
+                  {currentApp.resumeRejectionReason || currentApp.githubRejectionReason || "Application did not meet the required cutoff standards for this role."}
+                </p>
+                <div className="pt-2 text-ink-soft flex items-center gap-2">
+                  <span className="font-semibold text-ink">Action Required: </span>
+                  <span>Review your <strong>Skill Map &amp; Personalized Improvement Plan</strong> under Tab 06 to enhance your profile for future roles.</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 6 Stage Navigation Tabs */}
         {currentApp && (
           <>
@@ -352,17 +456,6 @@ export const BeforeInterviewCandidatePanel = () => {
                 })}
               </div>
             </div>
-
-            {/* Rejection Notice Banner if auto-rejected */}
-            {currentApp.currentStage === "rejected" && (
-              <div className="mx-6 mt-6 p-4 rounded-2xl bg-destructive/10 border border-destructive/30 flex items-start gap-3 text-xs text-destructive">
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-semibold block">Application Auto-Rejected Notice</span>
-                  <span>{currentApp.resumeRejectionReason || currentApp.githubRejectionReason || "Application did not meet the required cutoff standards."}</span>
-                </div>
-              </div>
-            )}
 
             {/* Main Interactive Tab Content */}
             <div className="p-6 md:p-10 bg-paper min-h-[460px]">
@@ -396,7 +489,7 @@ export const BeforeInterviewCandidatePanel = () => {
                           Evaluated against job description requirements, verified project context, and keyword frequency.
                         </div>
                         <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
-                          Required Cutoff: {activeJob?.resumeCutoff || 75}%
+                          Required Cutoff: {activeJob?.resumeCutoff || 75}% · Status: <span className={currentApp.resumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{currentApp.resumePassed ? "Passed" : "Below Cutoff"}</span>
                         </div>
                       </div>
 
@@ -485,8 +578,8 @@ export const BeforeInterviewCandidatePanel = () => {
                     <div className="p-4 rounded-xl bg-forest/5 border border-forest/15 flex items-start gap-3">
                       <ShieldCheck className="w-5 h-5 text-forest shrink-0 mt-0.5" />
                       <div className="text-xs text-ink-soft">
-                        <span className="font-semibold text-ink">HireZap Integrity Principle: </span>
-                        GitHub evidence is treated as a <em>signal</em>, not definitive proof of solo authorship. We inspect languages, commit history, and code structure to formulate precision verification questions during subsequent rounds.
+                        <span className="font-semibold text-ink">Code Authenticity Verification: </span>
+                        GitHub evidence is analyzed for genuine developer commits vs AI boilerplate. We inspect languages, commit timeline, and code structure.
                       </div>
                     </div>
 
@@ -520,7 +613,7 @@ export const BeforeInterviewCandidatePanel = () => {
                               <GitBranch className="w-3.5 h-3.5 text-forest" />
                               Primary Repository
                             </span>
-                            <span className="text-xs font-mono text-ink-muted">★ 18</span>
+                            <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
                           </div>
                           <p className="text-xs text-ink-soft mb-3 font-mono">
                             <a href={currentApp.githubRepo1Url} target="_blank" rel="noreferrer" className="underline text-forest">
@@ -552,7 +645,7 @@ export const BeforeInterviewCandidatePanel = () => {
                         <div>
                           <h4 className="font-semibold text-sm text-ink mb-2 flex items-center gap-2">
                             <Layers className="w-4 h-4 text-forest" />
-                            Extracted Project Architecture
+                            Extracted Project Architecture ({currentApp.projectValidationScore}/100)
                           </h4>
                           <p className="text-xs text-ink-soft mb-3">{currentApp.projectArchitectureSummary || currentApp.projectFeedback}</p>
                           <div className="p-3 rounded-xl bg-ink text-paper font-mono text-xs overflow-x-auto mb-3">
@@ -584,7 +677,7 @@ export const BeforeInterviewCandidatePanel = () => {
                   >
                     <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
                       <span className="text-ink-soft">
-                        Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks</strong>
+                        Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
                       </span>
                       {!mcqSubmitted ? (
                         <Button
