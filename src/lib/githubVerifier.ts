@@ -129,6 +129,9 @@ export interface GitHubVerificationReport {
     questions: GitHubCodeUnderstandingQuestion[];
   };
   understandingScore: number; // 0-100
+  authenticityPercentage: number; // Human Hand-Written percentage (e.g. 88%)
+  aiWrittenPercentage: number; // AI-Generated percentage (100 - authenticityPercentage)
+  githubScore: number; // Overall GitHub Quality score (0-100)
   finalStatus: GitHubVerificationFinalStatus;
   finalSummary: string;
   disclaimer: string;
@@ -825,15 +828,36 @@ export async function performGitHubCodeVerification(
     aiConfidence = "Low";
   }
 
-  const aiAuthorshipEvidence: AIAuthorshipEvidence = {
-    detected: aiPoints > 0,
-    confidence: aiConfidence,
-    evidenceList:
-      aiEvidenceList.length > 0
-        ? aiEvidenceList
-        : ["No direct AI co-authorship tags or prompt markers detected in commit history."],
-    summary: finalSummary,
-  };
+  // 7. Dynamic Human Authenticity % vs AI % & GitHub Quality Score Calculation
+  let authenticityPercentage = 88;
+  let aiWrittenPercentage = 12;
+  let githubScore = 88;
+
+  if (finalStatus === "HAND-WRITTEN") {
+    // Verified Hand-Written human engineering
+    authenticityPercentage = Math.min(98, Math.max(85, 88 + Math.round(humanPoints * 0.08)));
+    aiWrittenPercentage = 100 - authenticityPercentage;
+    githubScore = Math.min(100, Math.round(authenticityPercentage * 0.9 + (understandingScore >= 80 ? 8 : 4)));
+  } else if (finalStatus === "AI-GENERATED") {
+    // High AI generation detected: Human authenticity is low (8-25%), AI percentage is high (75-92%)
+    authenticityPercentage = Math.max(8, Math.min(25, Math.round(25 - (aiPoints * 0.1))));
+    aiWrittenPercentage = 100 - authenticityPercentage;
+    // GitHub Score reflects poor genuine code authorship and fails the cutoff (<70)
+    githubScore = Math.max(12, Math.min(28, Math.round(authenticityPercentage * 0.8 + 5)));
+  } else if (finalStatus === "AI-ASSISTED") {
+    authenticityPercentage = Math.max(45, Math.min(65, Math.round(52 + (humanPoints - aiPoints) * 0.1)));
+    aiWrittenPercentage = 100 - authenticityPercentage;
+    githubScore = Math.max(48, Math.min(65, Math.round(authenticityPercentage * 0.9 + (understandingScore >= 80 ? 5 : 0))));
+  } else if (finalStatus === "MIXED") {
+    authenticityPercentage = Math.max(60, Math.min(74, Math.round(65 + (humanPoints - aiPoints) * 0.08)));
+    aiWrittenPercentage = 100 - authenticityPercentage;
+    githubScore = Math.max(62, Math.min(74, Math.round(authenticityPercentage * 0.95)));
+  } else {
+    // UNCERTAIN
+    authenticityPercentage = 50;
+    aiWrittenPercentage = 50;
+    githubScore = 50;
+  }
 
   return {
     repoDetails,
@@ -848,6 +872,9 @@ export async function performGitHubCodeVerification(
       questions: answeredQuestions,
     },
     understandingScore,
+    authenticityPercentage,
+    aiWrittenPercentage,
+    githubScore,
     finalStatus,
     finalSummary,
     disclaimer: AI_DETECTION_DISCLAIMER,

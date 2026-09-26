@@ -115,6 +115,30 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
               </Badge>
             </div>
 
+            {/* Human Hand-Written vs AI Score */}
+            <div className="space-y-1 border-l border-ink/10 pl-4">
+              <div className="text-[10px] font-mono uppercase text-ink-muted">Human vs AI Ratio</div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-serif-display text-2xl font-bold text-forest">
+                  {report.authenticityPercentage ?? 88}%
+                </span>
+                <span className="text-[10px] font-mono text-ink-muted">
+                  Human ({report.aiWrittenPercentage ?? 12}% AI)
+                </span>
+              </div>
+            </div>
+
+            {/* GitHub Quality Score */}
+            <div className="space-y-1 border-l border-ink/10 pl-4">
+              <div className="text-[10px] font-mono uppercase text-ink-muted">GitHub Quality Score</div>
+              <div className="flex items-baseline gap-1">
+                <span className="font-serif-display text-2xl font-bold text-ink">
+                  {report.githubScore ?? 88}
+                </span>
+                <span className="text-[10px] font-mono text-ink-muted">/100</span>
+              </div>
+            </div>
+
             {/* Understanding Score */}
             <div className="space-y-1 border-l border-ink/10 pl-4">
               <div className="text-[10px] font-mono uppercase text-ink-muted">Understanding Score</div>
@@ -139,6 +163,14 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
 
       {/* Multi-Signal Verification Breakdown Matrix */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
+          <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3 text-forest" /> Human Authenticity
+          </div>
+          <div className="font-semibold text-sm text-forest">{report.authenticityPercentage ?? 88}% Verified</div>
+          <div className="text-[10px] text-ink-muted">{report.aiWrittenPercentage ?? 12}% AI / Scaffold</div>
+        </div>
+
         <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
           <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
             <GitCommit className="w-3 h-3 text-forest" /> Commit Cadence

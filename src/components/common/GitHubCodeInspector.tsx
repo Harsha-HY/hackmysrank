@@ -146,13 +146,18 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
 
       setVerificationReport(updatedReport);
 
+      const finalAuthenticityPct = updatedReport.authenticityPercentage ?? newAuthenticityPct;
+      const finalAiPct = updatedReport.aiWrittenPercentage ?? (100 - finalAuthenticityPct);
+      const finalGithubScore = updatedReport.githubScore ?? newGithubScore;
+      const finalGithubPassed = finalGithubScore >= githubCutoff && finalAuthenticityPct >= 70;
+
       const updatedApp: CandidateApplicationSubmission = {
         ...application,
-        authenticityPercentage: newAuthenticityPct,
-        aiWrittenPercentage: newAiPct,
-        githubScore: newGithubScore,
-        githubPassed: newGithubPassed,
-        githubFeedback: geminiResult?.githubFeedback || "Gemini code authenticity scan complete.",
+        authenticityPercentage: finalAuthenticityPct,
+        aiWrittenPercentage: finalAiPct,
+        githubScore: finalGithubScore,
+        githubPassed: finalGithubPassed,
+        githubFeedback: geminiResult?.githubFeedback || updatedReport.finalSummary || "Gemini code authenticity scan complete.",
         codeSignals: geminiResult?.codeSignals || application.codeSignals,
         inspectedCodeFiles: updatedFiles,
         githubVerificationReport: updatedReport,
@@ -166,7 +171,7 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
 
       toast({
         title: "🤖 GitHub Verification Scan Complete",
-        description: `Status: ${updatedReport.finalStatus} · Understanding Score: ${updatedReport.understandingScore}%`,
+        description: `Status: ${updatedReport.finalStatus} · Human Authenticity: ${finalAuthenticityPct}% · Score: ${finalGithubScore}/100`,
       });
     } catch (e) {
       console.error("Gemini GitHub scan error:", e);
@@ -182,8 +187,14 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
 
   const handleAssessmentCompleted = (completedReport: GitHubVerificationReport) => {
     setVerificationReport(completedReport);
+    const finalAuthenticity = completedReport.authenticityPercentage ?? application.authenticityPercentage;
+    const finalGithubScore = completedReport.githubScore ?? application.githubScore;
     const updatedApp: CandidateApplicationSubmission = {
       ...application,
+      authenticityPercentage: finalAuthenticity,
+      aiWrittenPercentage: completedReport.aiWrittenPercentage ?? (100 - finalAuthenticity),
+      githubScore: finalGithubScore,
+      githubPassed: (finalGithubScore ?? 0) >= githubCutoff && (finalAuthenticity ?? 0) >= 70,
       githubVerificationReport: completedReport,
     };
     if (onApplicationUpdate) {
