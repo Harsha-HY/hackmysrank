@@ -19,6 +19,8 @@ import {
   GitFork,
   AlertTriangle,
   Info,
+  Activity,
+  FileSearch,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,35 +44,41 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
 }) => {
   const getStatusBadge = (status: GitHubVerificationFinalStatus) => {
     switch (status) {
-      case "No evidence":
+      case "HAND-WRITTEN":
         return {
           bg: "bg-forest/10 text-forest border-forest/30",
           icon: <CheckCircle2 className="w-4 h-4 text-forest" />,
-          label: "No AI Evidence / Verified Authentic",
+          label: "HAND-WRITTEN",
+          description: "Verified natural incremental development, bespoke domain logic, and zero AI co-authorship metadata.",
         };
-      case "AI indicators":
+      case "AI-GENERATED":
         return {
           bg: "bg-destructive/10 text-destructive border-destructive/30",
           icon: <AlertTriangle className="w-4 h-4 text-destructive" />,
-          label: "AI Indicators Detected",
+          label: "AI-GENERATED",
+          description: "Single-commit bulk dump, explicit AI co-authorship markers, or hyper-uniform boilerplate detected.",
         };
-      case "Mixed":
+      case "AI-ASSISTED":
         return {
           bg: "bg-amber-500/10 text-amber-800 border-amber-500/30",
-          icon: <AlertCircle className="w-4 h-4 text-amber-600" />,
-          label: "Mixed Authorship & Boilerplate",
+          icon: <Cpu className="w-4 h-4 text-amber-600" />,
+          label: "AI-ASSISTED",
+          description: "Authentic developer commits accompanied by AI co-pilots, automated scaffolds, or helper generation.",
         };
-      case "Human review required":
+      case "MIXED":
         return {
           bg: "bg-amber-500/15 text-amber-900 border-amber-500/40",
-          icon: <HelpCircle className="w-4 h-4 text-amber-700" />,
-          label: "Human Review Required",
+          icon: <AlertCircle className="w-4 h-4 text-amber-700" />,
+          label: "MIXED",
+          description: "Combination of custom human-authored business logic and generic AI boilerplate templates.",
         };
+      case "UNCERTAIN":
       default:
         return {
-          bg: "bg-ink/10 text-ink border-ink/20",
-          icon: <ShieldCheck className="w-4 h-4 text-ink" />,
-          label: status,
+          bg: "bg-ink/10 text-ink-soft border-ink/20",
+          icon: <HelpCircle className="w-4 h-4 text-ink-muted" />,
+          label: "UNCERTAIN",
+          description: "Insufficient verifiable commit/source evidence. Manual code walkthrough recommended.",
         };
     }
   };
@@ -93,17 +101,17 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
               {candidateName} — Repository Authorship Audit
             </h2>
             <p className="text-xs text-ink-soft">
-              Deep inspection of Git commit history, author distribution, non-build source code, and candidate code comprehension.
+              Multi-signal static analysis: Git commit timing, author history, AI attribution metadata, clean code structure, and candidate comprehension.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-4 bg-paper-2 p-4 rounded-2xl border border-ink/10">
             {/* Final Status */}
             <div className="space-y-1">
-              <div className="text-[10px] font-mono uppercase text-ink-muted">Final Status</div>
-              <Badge variant="outline" className={`font-mono text-xs px-3 py-1 flex items-center gap-1.5 ${statusConfig.bg}`}>
+              <div className="text-[10px] font-mono uppercase text-ink-muted">Authorship Classification</div>
+              <Badge variant="outline" className={`font-mono text-xs px-3 py-1 flex items-center gap-1.5 font-bold ${statusConfig.bg}`}>
                 {statusConfig.icon}
-                <span className="font-bold">{report.finalStatus}</span>
+                <span>{statusConfig.label}</span>
               </Badge>
             </div>
 
@@ -126,6 +134,45 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
             <Sparkles className="w-3.5 h-3.5 text-forest" /> Verification Executive Summary:
           </span>
           <p className="leading-relaxed pl-5">{report.finalSummary}</p>
+        </div>
+      </div>
+
+      {/* Multi-Signal Verification Breakdown Matrix */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
+          <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
+            <GitCommit className="w-3 h-3 text-forest" /> Commit Cadence
+          </div>
+          <div className="font-semibold text-sm text-ink">{report.commitAnalysis.cadence}</div>
+          <div className="text-[10px] text-ink-muted">{report.commitAnalysis.totalCommits} commits analyzed</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
+          <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
+            <Users className="w-3 h-3 text-forest" /> Candidate Contribution
+          </div>
+          <div className="font-semibold text-sm text-forest">{report.commitAnalysis.candidateContributionPercent}% of Commits</div>
+          <div className="text-[10px] text-ink-muted">{report.commitAnalysis.authorCount} distinct author(s)</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
+          <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
+            <Activity className="w-3 h-3 text-forest" /> Comment Uniformity
+          </div>
+          <div className="font-semibold text-sm text-ink">
+            {report.codeAnalysis.heuristicSignals?.uniformCommentDensity ?? 15}% Density
+          </div>
+          <div className="text-[10px] text-ink-muted">Generic statement ratio</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-paper border border-ink/10 shadow-sm space-y-1">
+          <div className="text-[10px] font-mono uppercase text-ink-muted flex items-center gap-1">
+            <FileSearch className="w-3 h-3 text-forest" /> Clean Source Scope
+          </div>
+          <div className="font-semibold text-sm text-ink">
+            {report.codeAnalysis.inspectedFilesCount} Files Inspected
+          </div>
+          <div className="text-[10px] text-ink-muted">node_modules/dist excluded</div>
         </div>
       </div>
 
@@ -206,7 +253,7 @@ export const GitHubVerificationReportView: React.FC<GitHubVerificationReportView
                 <Users className="w-3.5 h-3.5 text-forest" /> Author Breakdown:
               </div>
               <div className="space-y-1">
-                {report.commitAnalysis.authors.map((author, idx) => (
+                {(report.commitAnalysis.authors || []).map((author, idx) => (
                   <div key={idx} className="p-2 rounded-xl bg-paper-2 border border-ink/5 flex items-center justify-between font-mono text-[11px]">
                     <span className={author.isCandidate ? "text-forest font-bold" : "text-ink"}>
                       {author.isCandidate ? "👤 " : "👥 "} {author.name} {author.isCandidate && "(Candidate)"}
