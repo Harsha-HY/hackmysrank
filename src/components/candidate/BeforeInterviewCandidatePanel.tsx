@@ -605,7 +605,7 @@ export const BeforeInterviewCandidatePanel = () => {
               <div className="flex items-center gap-2">
                 <span className="text-ink-muted">Detected Stacks:</span>
                 <div className="flex flex-wrap gap-1">
-                  {currentApp.detectedRepoStacks.map((s) => (
+                  {(currentApp.detectedRepoStacks || []).map((s) => (
                     <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
                       {s}
                     </span>
@@ -1003,25 +1003,25 @@ export const BeforeInterviewCandidatePanel = () => {
                       <>
                         <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
                           <span className="text-ink-soft">
-                            Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
+                            Generated from: <strong className="text-ink">Job Requirements + Candidate Submitted Repo Stacks ({(currentApp.detectedRepoStacks || []).join(", ")})</strong>
                           </span>
                           {!mcqSubmitted ? (
                             <Button
                               onClick={handleMCQSubmit}
-                              disabled={Object.keys(selectedMCQAnswers).length < currentApp.generatedMCQs.length}
+                              disabled={Object.keys(selectedMCQAnswers).length < (currentApp.generatedMCQs || []).length}
                               className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
                             >
-                              Submit {currentApp.generatedMCQs.length} MCQs
+                              Submit {(currentApp.generatedMCQs || []).length} MCQs
                             </Button>
                           ) : (
                             <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
-                              Score: {currentApp.mcqScore ?? Object.keys(selectedMCQAnswers).length} / {currentApp.generatedMCQs.length} Correct ✓
+                              Score: {currentApp.mcqScore ?? Object.keys(selectedMCQAnswers).length} / {(currentApp.generatedMCQs || []).length} Correct ✓
                             </span>
                           )}
                         </div>
 
                         <div className="space-y-4">
-                          {currentApp.generatedMCQs.map((q, idx) => (
+                          {(currentApp.generatedMCQs || []).map((q, idx) => (
                             <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper hover:border-forest/40 transition-colors">
                               <div className="flex items-start justify-between gap-4 mb-2">
                                 <div className="flex items-center gap-2">
@@ -1038,7 +1038,7 @@ export const BeforeInterviewCandidatePanel = () => {
                               <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
 
                               <div className="grid gap-2 pl-8">
-                                {q.options.map((opt, optIdx) => {
+                                {(q.options || []).map((opt, optIdx) => {
                                   const isSelected = selectedMCQAnswers[q.id] === optIdx || q.userAnswer === optIdx;
                                   const isCorrect = optIdx === q.correctIndex;
                                   return (
@@ -1118,7 +1118,7 @@ export const BeforeInterviewCandidatePanel = () => {
 
                           {/* Challenge Switcher */}
                           <div className="flex bg-paper-2 p-1 rounded-xl border border-ink/10 gap-1 self-start sm:self-center">
-                            {currentApp.repoCodingChallenges.map((c, i) => (
+                            {(currentApp.repoCodingChallenges || []).map((c, i) => (
                               <button
                                 key={c.id}
                                 onClick={() => setActiveChallengeIdx(i)}
@@ -1151,7 +1151,7 @@ export const BeforeInterviewCandidatePanel = () => {
                                 <div className="pt-2 border-t border-ink/10">
                                   <span className="text-[11px] font-semibold text-ink block mb-1.5">Verification Test Cases:</span>
                                   <div className="space-y-1.5">
-                                    {currentChallenge.testCases.map((tc, idx) => (
+                                    {(currentChallenge.testCases || []).map((tc, idx) => (
                                       <div key={idx} className="p-2 rounded-lg bg-paper border border-ink/5 text-[11px] font-mono">
                                         <div className="text-ink-soft">Input: <span className="text-ink">{tc.input}</span></div>
                                         <div className="text-forest font-semibold">Expected: {tc.expectedOutput}</div>

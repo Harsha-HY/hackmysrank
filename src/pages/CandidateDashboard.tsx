@@ -309,13 +309,20 @@ const CandidateDashboard = () => {
 
     // Check URL parameters for tab navigation
     const params = new URLSearchParams(window.location.search);
-    const tabParam = params.get("tab");
-    if (tabParam === "before_interview" || tabParam === "before-interview") {
+    const tabParam = params.get("tab")?.toLowerCase();
+    if (tabParam === "before_interview" || tabParam === "before-interview" || tabParam === "beforeinterview") {
       setActiveTab("before-interview");
     }
 
     const handleSwitchTab = (e: any) => {
-      if (e.detail) setActiveTab(e.detail);
+      if (e.detail) {
+        const val = String(e.detail).toLowerCase();
+        if (val === "before_interview" || val === "before-interview" || val === "beforeinterview") {
+          setActiveTab("before-interview");
+        } else {
+          setActiveTab(e.detail);
+        }
+      }
     };
     window.addEventListener("hz_switch_candidate_tab", handleSwitchTab);
     return () => window.removeEventListener("hz_switch_candidate_tab", handleSwitchTab);
@@ -1082,6 +1089,8 @@ const CandidateDashboard = () => {
       case "history":
         return renderHistory();
       case "before-interview":
+      case "before_interview":
+      case "beforeinterview":
         return <BeforeInterviewCandidatePanel />;
       case "interviews":
         return renderInterviewsTab();

@@ -86,6 +86,19 @@ export default function JourneyDrawer({ open, onClose, app, gdInfo, submittedTes
                       <p className="text-xs text-muted-foreground mt-1">{s.config.instructions}</p>
                     )}
 
+                    {current && (s.key === "before_interview" || raw === "before_interview" || s.key === "resume") && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          onClose();
+                          window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "before-interview" }));
+                          navigate("/candidate-dashboard?tab=before-interview");
+                        }}
+                        className="mt-2 h-7 px-3 text-xs bg-primary text-primary-foreground gap-1.5"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> Open Before Interview
+                      </Button>
+                    )}
                     {current && s.key === "aptitude" && !submittedTest && (
                       <Button size="sm" onClick={() => navigate("/aptitude-test")} className="mt-2 h-7 px-3 text-xs">🎯 Take Test</Button>
                     )}

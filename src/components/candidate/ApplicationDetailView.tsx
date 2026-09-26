@@ -300,6 +300,18 @@ export default function ApplicationDetailView({ app, gdInfo, submittedTest, onBa
                       {STAGE_DESC[s.key] || s.config?.instructions || "Round in this hiring process"}
                     </p>
 
+                    {(s.key === "before_interview" || raw === "before_interview" || (current && s.key === "resume")) && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "before-interview" }));
+                          navigate("/candidate-dashboard?tab=before-interview");
+                        }}
+                        className="mt-3 h-8 px-3 text-xs bg-primary text-primary-foreground gap-1.5"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> Open Before Interview
+                      </Button>
+                    )}
                     {current && s.key === "aptitude" && !submittedTest && (
                       <Button size="sm" onClick={() => navigate("/aptitude-test")} className="mt-3 h-8 px-3 text-xs">🎯 Take Aptitude Test</Button>
                     )}

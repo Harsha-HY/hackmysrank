@@ -139,6 +139,9 @@ const App = () => (
               </ProtectedRoute>
             }
           />
+          <Route path="/before-interview" element={<Navigate to="/candidate-dashboard?tab=before-interview" replace />} />
+          <Route path="/before_interview" element={<Navigate to="/candidate-dashboard?tab=before-interview" replace />} />
+          <Route path="/beforeinterview" element={<Navigate to="/candidate-dashboard?tab=before-interview" replace />} />
           <Route
             path="/profile"
             element={
