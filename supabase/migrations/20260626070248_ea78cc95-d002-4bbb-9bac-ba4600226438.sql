@@ -1,0 +1,1 @@
+DROP VIEW IF EXISTS public.company_public_profiles;

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <rect width="1200" height="630" fill="#080B18"/>
+  <rect x="72" y="72" width="1056" height="486" rx="28" fill="#10162A" stroke="#26314F" stroke-width="2"/>
+  <circle cx="196" cy="194" r="68" fill="#00E6A8" fill-opacity=".14"/>
+  <path d="M204 105 126 309h66l-22 110 112-180h-72l58-134h-64Z" fill="#00E6A8"/>
+  <text x="340" y="265" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="86" font-weight="800">Hire<tspan fill="#00E6A8">Zap</tspan></text>
+  <text x="344" y="340" fill="#B8C2D9" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="500">AI Powered Recruitment Platform</text>
+  <rect x="344" y="390" width="254" height="48" rx="24" fill="#00E6A8" fill-opacity=".12"/>
+  <text x="374" y="423" fill="#00E6A8" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">Recruit faster</text>
+</svg>

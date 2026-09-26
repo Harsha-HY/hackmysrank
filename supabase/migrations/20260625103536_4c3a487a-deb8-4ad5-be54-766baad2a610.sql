@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.handle_new_candidate_user() FROM PUBLIC, anon, authenticated;

@@ -1,0 +1,410 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 228 50% 4.5%;
+    --foreground: 0 0% 100%;
+
+    --card: 232 38% 7.5%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 232 38% 7.5%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 160 100% 45%;
+    --primary-foreground: 228 50% 4.5%;
+
+    --secondary: 232 38% 12%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 232 30% 15%;
+    --muted-foreground: 228 10% 55%;
+
+    --accent: 160 100% 45%;
+    --accent-foreground: 228 50% 4.5%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 232 30% 18%;
+    --input: 232 30% 15%;
+    --ring: 160 100% 45%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 232 38% 7.5%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 160 100% 45%;
+    --sidebar-primary-foreground: 228 50% 4.5%;
+    --sidebar-accent: 232 30% 15%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 232 30% 18%;
+    --sidebar-ring: 160 100% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+}
+
+@layer utilities {
+  .text-gradient-green-blue {
+    background: linear-gradient(135deg, #00e5a0 0%, #4a9eff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .bg-hz-bg { background-color: #07080f; }
+  .bg-hz-card { background-color: #0d0f1a; }
+  .bg-hz-card2 { background-color: #121424; }
+  .border-hz { border-color: #1a2035; }
+  .text-hz-gray { color: #8892a4; }
+  .text-hz-light { color: #cbd5e1; }
+  .text-hz-green { color: #00e5a0; }
+  .bg-hz-green { background-color: #00e5a0; }
+
+  .text-brand-hire { color: #071338; }
+  .text-brand-hire-inverse { color: #f7f9ff; }
+  .text-brand-zap {
+    color: #1857f5;
+    background: linear-gradient(110deg, #09ccea 0%, #075eff 45%, #7426f5 78%, #b01df2 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  [data-hz-theme="noir"] .text-brand-hire,
+  [data-hz-theme="midnight"] .text-brand-hire,
+  [data-hz-theme="mint"] .text-brand-hire { color: #f7f9ff; }
+
+  @keyframes hz-pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,229,160,0.45); }
+    50% { box-shadow: 0 0 28px 4px rgba(0,229,160,0.25); }
+  }
+  .hz-pulse { animation: hz-pulse-glow 2.4s ease-in-out infinite; }
+
+  /* HireZap brand loader — logo stays still, a comet of light orbits it */
+  @keyframes hz-loader-orbit {
+    to { transform: rotate(360deg); }
+  }
+  .brand-loader-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 235deg,
+      currentColor 325deg,
+      transparent 360deg
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 13%), #000 calc(100% - 13%));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 13%), #000 calc(100% - 13%));
+    filter: drop-shadow(0 0 2px currentColor);
+    animation: hz-loader-orbit 0.9s linear infinite;
+  }
+  .brand-loader-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 285deg,
+      currentColor 335deg,
+      transparent 360deg
+    );
+    filter: blur(2px);
+    opacity: 0.55;
+    animation: hz-loader-orbit 0.9s linear infinite;
+  }
+
+
+  /* Editorial premium landing tokens — themeable via [data-hz-theme] */
+  .font-serif-display { font-family: 'Instrument Serif', 'Times New Roman', serif; font-weight: 400; letter-spacing: -0.01em; }
+
+  .bg-paper        { background-color: var(--hz-paper); }
+  .bg-paper-2      { background-color: var(--hz-paper-2); }
+  .bg-ink          { background-color: var(--hz-ink); }
+  .text-ink        { color: var(--hz-ink); }
+  .text-ink-soft   { color: var(--hz-ink-soft); }
+  .text-ink-muted  { color: var(--hz-ink-muted); }
+  .border-ink      { border-color: var(--hz-ink); }
+  .border-ink-soft { border-color: var(--hz-ink-soft-border); }
+  .text-forest     { color: var(--hz-accent); }
+  .bg-forest       { background-color: var(--hz-accent); }
+  .text-paper      { color: var(--hz-paper); }
+  .text-paper-soft { color: color-mix(in srgb, var(--hz-paper) 72%, transparent); }
+  .text-paper-muted{ color: color-mix(in srgb, var(--hz-paper) 52%, transparent); }
+  .text-paper-divider { color: color-mix(in srgb, var(--hz-paper) 32%, transparent); }
+  .border-paper-soft { border-color: color-mix(in srgb, var(--hz-paper) 30%, transparent); }
+  .bg-paper-soft   { background-color: color-mix(in srgb, var(--hz-paper) 14%, transparent); }
+  .text-ember      { color: #b4451f; }
+  .bg-ember        { background-color: #b4451f; }
+
+  @keyframes ink-marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .ink-marquee { animation: ink-marquee 40s linear infinite; }
+}
+
+/* ---------- App-wide themes (landing + dashboards) ----------
+   Each theme sets BOTH the landing `--hz-*` tokens AND the shadcn
+   tokens used by dashboards (`--background`, `--foreground`, etc).
+   Tokens are HSL "h s% l%" so Tailwind `hsl(var(--token))` resolves. */
+
+:root,
+[data-hz-theme="paper"] {
+  --hz-paper: #f6f3ec; --hz-paper-2: #efe9dc;
+  --hz-ink: #0e0e0e; --hz-ink-soft: #555049; --hz-ink-muted: #8a8478;
+  --hz-ink-soft-border: rgba(14,14,14,0.12); --hz-accent: #1a3c2a;
+
+  --background: 42 36% 95%;
+  --foreground: 0 0% 6%;
+  --card: 43 33% 90%;
+  --card-foreground: 0 0% 6%;
+  --popover: 43 33% 92%;
+  --popover-foreground: 0 0% 6%;
+  --primary: 150 40% 17%;
+  --primary-foreground: 42 36% 96%;
+  --secondary: 43 25% 86%;
+  --secondary-foreground: 0 0% 6%;
+  --muted: 43 25% 88%;
+  --muted-foreground: 35 8% 35%;
+  --accent: 150 40% 17%;
+  --accent-foreground: 42 36% 96%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 35 15% 78%;
+  --input: 35 15% 80%;
+  --ring: 150 40% 17%;
+  --sidebar-background: 43 33% 92%;
+  --sidebar-foreground: 0 0% 6%;
+  --sidebar-primary: 150 40% 17%;
+  --sidebar-primary-foreground: 42 36% 96%;
+  --sidebar-accent: 43 25% 86%;
+  --sidebar-accent-foreground: 0 0% 6%;
+  --sidebar-border: 35 15% 78%;
+  --sidebar-ring: 150 40% 17%;
+}
+
+[data-hz-theme="noir"] {
+  --hz-paper: #0d0d0d; --hz-paper-2: #151515;
+  --hz-ink: #f0e9d2; --hz-ink-soft: #bdb49a; --hz-ink-muted: #807865;
+  --hz-ink-soft-border: rgba(240,233,210,0.14); --hz-accent: #c9a84c;
+
+  --background: 0 0% 5%;
+  --foreground: 46 55% 88%;
+  --card: 0 0% 9%;
+  --card-foreground: 46 55% 88%;
+  --popover: 0 0% 9%;
+  --popover-foreground: 46 55% 88%;
+  --primary: 43 53% 54%;
+  --primary-foreground: 0 0% 5%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 46 55% 88%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 43 24% 67%;
+  --accent: 43 53% 54%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 0 70% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 43 20% 18%;
+  --input: 0 0% 14%;
+  --ring: 43 53% 54%;
+  --sidebar-background: 0 0% 7%;
+  --sidebar-foreground: 46 55% 88%;
+  --sidebar-primary: 43 53% 54%;
+  --sidebar-primary-foreground: 0 0% 5%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 46 55% 88%;
+  --sidebar-border: 43 20% 18%;
+  --sidebar-ring: 43 53% 54%;
+}
+
+[data-hz-theme="midnight"] {
+  --hz-paper: #0a0a1a; --hz-paper-2: #11112a;
+  --hz-ink: #e8ecff; --hz-ink-soft: #a9b0d4; --hz-ink-muted: #6f769b;
+  --hz-ink-soft-border: rgba(232,236,255,0.14); --hz-accent: #7c6cff;
+
+  --background: 240 45% 7%;
+  --foreground: 228 100% 95%;
+  --card: 240 43% 12%;
+  --card-foreground: 228 100% 95%;
+  --popover: 240 43% 12%;
+  --popover-foreground: 228 100% 95%;
+  --primary: 247 100% 71%;
+  --primary-foreground: 240 45% 7%;
+  --secondary: 240 35% 18%;
+  --secondary-foreground: 228 100% 95%;
+  --muted: 240 30% 20%;
+  --muted-foreground: 229 25% 70%;
+  --accent: 247 100% 71%;
+  --accent-foreground: 240 45% 7%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 30% 22%;
+  --input: 240 30% 20%;
+  --ring: 247 100% 71%;
+  --sidebar-background: 240 43% 10%;
+  --sidebar-foreground: 228 100% 95%;
+  --sidebar-primary: 247 100% 71%;
+  --sidebar-primary-foreground: 240 45% 7%;
+  --sidebar-accent: 240 35% 18%;
+  --sidebar-accent-foreground: 228 100% 95%;
+  --sidebar-border: 240 30% 22%;
+  --sidebar-ring: 247 100% 71%;
+}
+
+[data-hz-theme="sand"] {
+  --hz-paper: #faf6ef; --hz-paper-2: #f0e8d8;
+  --hz-ink: #2a1d10; --hz-ink-soft: #6b5a45; --hz-ink-muted: #a08a6e;
+  --hz-ink-soft-border: rgba(42,29,16,0.14); --hz-accent: #b4451f;
+
+  --background: 40 56% 96%;
+  --foreground: 26 47% 12%;
+  --card: 40 46% 90%;
+  --card-foreground: 26 47% 12%;
+  --popover: 40 46% 92%;
+  --popover-foreground: 26 47% 12%;
+  --primary: 17 71% 41%;
+  --primary-foreground: 40 56% 96%;
+  --secondary: 40 35% 84%;
+  --secondary-foreground: 26 47% 12%;
+  --muted: 40 35% 86%;
+  --muted-foreground: 31 21% 38%;
+  --accent: 17 71% 41%;
+  --accent-foreground: 40 56% 96%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 35 22% 76%;
+  --input: 35 22% 80%;
+  --ring: 17 71% 41%;
+  --sidebar-background: 40 46% 92%;
+  --sidebar-foreground: 26 47% 12%;
+  --sidebar-primary: 17 71% 41%;
+  --sidebar-primary-foreground: 40 56% 96%;
+  --sidebar-accent: 40 35% 84%;
+  --sidebar-accent-foreground: 26 47% 12%;
+  --sidebar-border: 35 22% 76%;
+  --sidebar-ring: 17 71% 41%;
+}
+
+[data-hz-theme="ocean"] {
+  --hz-paper: #f0f6fa; --hz-paper-2: #dde9f2;
+  --hz-ink: #0c2340; --hz-ink-soft: #3d5572; --hz-ink-muted: #7c93ad;
+  --hz-ink-soft-border: rgba(12,35,64,0.14); --hz-accent: #2d8a9e;
+
+  --background: 204 45% 96%;
+  --foreground: 214 69% 15%;
+  --card: 207 38% 90%;
+  --card-foreground: 214 69% 15%;
+  --popover: 207 38% 92%;
+  --popover-foreground: 214 69% 15%;
+  --primary: 189 55% 40%;
+  --primary-foreground: 204 45% 97%;
+  --secondary: 207 30% 84%;
+  --secondary-foreground: 214 69% 15%;
+  --muted: 207 30% 86%;
+  --muted-foreground: 214 25% 38%;
+  --accent: 189 55% 40%;
+  --accent-foreground: 204 45% 97%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 210 22% 76%;
+  --input: 210 22% 80%;
+  --ring: 189 55% 40%;
+  --sidebar-background: 207 38% 92%;
+  --sidebar-foreground: 214 69% 15%;
+  --sidebar-primary: 189 55% 40%;
+  --sidebar-primary-foreground: 204 45% 97%;
+  --sidebar-accent: 207 30% 84%;
+  --sidebar-accent-foreground: 214 69% 15%;
+  --sidebar-border: 210 22% 76%;
+  --sidebar-ring: 189 55% 40%;
+}
+
+[data-hz-theme="forest"] {
+  --hz-paper: #f2efe6; --hz-paper-2: #e3decc;
+  --hz-ink: #0f2018; --hz-ink-soft: #3d5a48; --hz-ink-muted: #7a8a7e;
+  --hz-ink-soft-border: rgba(15,32,24,0.14); --hz-accent: #1a3c2a;
+
+  --background: 40 30% 93%;
+  --foreground: 150 33% 9%;
+  --card: 44 32% 84%;
+  --card-foreground: 150 33% 9%;
+  --popover: 44 32% 88%;
+  --popover-foreground: 150 33% 9%;
+  --primary: 150 40% 17%;
+  --primary-foreground: 40 30% 95%;
+  --secondary: 44 25% 80%;
+  --secondary-foreground: 150 33% 9%;
+  --muted: 44 25% 84%;
+  --muted-foreground: 143 18% 32%;
+  --accent: 150 40% 17%;
+  --accent-foreground: 40 30% 95%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 44 20% 74%;
+  --input: 44 20% 78%;
+  --ring: 150 40% 17%;
+  --sidebar-background: 44 32% 88%;
+  --sidebar-foreground: 150 33% 9%;
+  --sidebar-primary: 150 40% 17%;
+  --sidebar-primary-foreground: 40 30% 95%;
+  --sidebar-accent: 44 25% 80%;
+  --sidebar-accent-foreground: 150 33% 9%;
+  --sidebar-border: 44 20% 74%;
+  --sidebar-ring: 150 40% 17%;
+}
+
+[data-hz-theme="mint"] {
+  --hz-paper: #0d1b2a; --hz-paper-2: #122738;
+  --hz-ink: #e8fff5; --hz-ink-soft: #a8c9b8; --hz-ink-muted: #6b8a7c;
+  --hz-ink-soft-border: rgba(232,255,245,0.14); --hz-accent: #2dd4a8;
+
+  --background: 211 52% 11%;
+  --foreground: 150 100% 95%;
+  --card: 211 52% 15%;
+  --card-foreground: 150 100% 95%;
+  --popover: 211 52% 15%;
+  --popover-foreground: 150 100% 95%;
+  --primary: 165 65% 50%;
+  --primary-foreground: 211 52% 11%;
+  --secondary: 211 40% 20%;
+  --secondary-foreground: 150 100% 95%;
+  --muted: 211 35% 22%;
+  --muted-foreground: 143 21% 70%;
+  --accent: 165 65% 50%;
+  --accent-foreground: 211 52% 11%;
+  --destructive: 0 72% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 211 30% 25%;
+  --input: 211 30% 22%;
+  --ring: 165 65% 50%;
+  --sidebar-background: 211 52% 13%;
+  --sidebar-foreground: 150 100% 95%;
+  --sidebar-primary: 165 65% 50%;
+  --sidebar-primary-foreground: 211 52% 11%;
+  --sidebar-accent: 211 40% 20%;
+  --sidebar-accent-foreground: 150 100% 95%;
+  --sidebar-border: 211 30% 25%;
+  --sidebar-ring: 165 65% 50%;
+}
+

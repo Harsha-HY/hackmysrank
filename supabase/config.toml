@@ -1,0 +1,31 @@
+project_id = "aqifremdpprnaayptdqi"
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.score-resume]
+verify_jwt = false
+
+[functions.generate-assessment]
+verify_jwt = false
+
+[functions.parse-pdf-questions]
+verify_jwt = false
+
+[functions.generate-technical]
+verify_jwt = false
+
+[functions.score-technical]
+verify_jwt = false
+
+[functions.suggest-gd-topics]
+verify_jwt = false
+
+[functions.analyze-gd]
+verify_jwt = false
+
+[functions.resume-ai]
+verify_jwt = false
+
+[functions.purge-company-staff]
+verify_jwt = true
