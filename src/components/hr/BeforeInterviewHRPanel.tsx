@@ -28,6 +28,7 @@ import {
 } from "@/lib/hiringWorkflowEngine";
 import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
 import { supabase } from "@/integrations/supabase/client";
+import { useLiveData } from "@/hooks/useLiveData";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 export const BeforeInterviewHRContent = () => {
@@ -168,11 +169,9 @@ export const BeforeInterviewHRContent = () => {
           }, targetJob);
         });
 
-        // Merge real Supabase applications with workflow cache
-        const dbAppIds = new Set(hydrated.map((a) => a.id));
-        const merged = [...hydrated, ...(loadedApps || []).filter((a) => !dbAppIds.has(a.id) && !dbAppIds.has(a.applicationId))];
-        loadedApps = merged;
-        saveWorkflowApplications(merged);
+        // Real database applications are the single source of truth
+        loadedApps = hydrated;
+        saveWorkflowApplications(hydrated);
       }
     } catch (e) {
       console.warn("Could not load applications from Supabase", e);
@@ -204,6 +203,11 @@ export const BeforeInterviewHRContent = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Real-time synchronization with Supabase applications and jobs
+  useLiveData(["applications", "jobs", "candidate_profiles"], () => {
+    loadData();
+  });
 
   const activeJob = jobs.find((j) => j.id === selectedJobId) || (jobs.length === 1 ? jobs[0] : null) || jobs[0] || DEFAULT_JOBS[0];
 
