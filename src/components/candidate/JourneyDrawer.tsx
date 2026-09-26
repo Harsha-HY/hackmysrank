@@ -6,12 +6,12 @@ import { normalizePipeline, enabledStages, type PipelineStage } from "@/lib/pipe
 
 // Map arbitrary application.current_stage strings to a pipeline stage key
 const normalizeStageKey = (raw: string): string => {
-  if (!raw) return "resume";
+  if (!raw) return "before_interview";
   if (String(raw).startsWith("round:")) return String(raw).slice(6);
-  if (["applied", "ai_scored", "shortlisted", "resume_review"].includes(raw)) return "resume";
-  if (["test_completed", "aptitude_test"].includes(raw)) return "aptitude";
+  if (["before_interview", "before-interview", "applied", "ai_scored", "shortlisted", "resume_review", "resume"].includes(raw)) return "before_interview";
+  if (["test_completed", "aptitude_test", "aptitude"].includes(raw)) return "aptitude";
   if (["video_submitted", "video_intro"].includes(raw)) return "video_intro";
-  if (["technical_test", "technical_completed", "technical_round"].includes(raw)) return "technical";
+  if (["technical_test", "technical_completed", "technical_round", "technical"].includes(raw)) return "technical";
   if (["group_discussion", "gd_completed", "gd"].includes(raw)) return "gd";
   if (["interview", "hr_interview"].includes(raw)) return "hr_interview";
   if (["managerial"].includes(raw)) return "managerial";
@@ -36,10 +36,7 @@ export default function JourneyDrawer({ open, onClose, app, gdInfo, submittedTes
   const rejected = app.status === "rejected";
 
   const rawStages = app.jobs?.pipeline_stages;
-  const pipeline: PipelineStage[] = rawStages && Array.isArray(rawStages) && rawStages.length > 0
-    ? enabledStages(normalizePipeline(rawStages))
-    : [];
-
+  const pipeline: PipelineStage[] = enabledStages(normalizePipeline(rawStages));
 
   const currentIdx = pipeline.findIndex((s) => s.key === currentKey);
 

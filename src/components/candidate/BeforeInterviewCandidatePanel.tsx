@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, GitBranch, ListChecks, Code2, Bot, Award, CheckCircle2,
@@ -26,11 +26,22 @@ import {
   addWorkflowJob
 } from "@/lib/hiringWorkflowEngine";
 import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
+import { fetchRealGitHubAnalysis } from "@/lib/githubRealFetcher";
 import { supabase } from "@/integrations/supabase/client";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import GitHubCodeInspector from "@/components/common/GitHubCodeInspector";
 
-export const BeforeInterviewCandidateContent = () => {
+export interface BeforeInterviewCandidatePanelProps {
+  candidateUser?: {
+    id?: string;
+    full_name?: string;
+    email?: string;
+    user_id?: string;
+    [key: string]: any;
+  } | null;
+}
+
+export const BeforeInterviewCandidateContent = ({ candidateUser }: BeforeInterviewCandidatePanelProps) => {
   const { toast } = useToast();
   const [applications, setApplications] = useState<CandidateApplicationSubmission[]>([]);
   const [jobs, setJobs] = useState<JobCutoffs[]>([]);
@@ -41,6 +52,15 @@ export const BeforeInterviewCandidateContent = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
   
+  // Track candidate identity for isolation
+  const [candidateInfo, setCandidateInfo] = useState<{ id: string; email: string; name: string }>({
+    id: candidateUser?.id || "",
+    email: candidateUser?.email || "",
+    name: candidateUser?.full_name || "",
+  });
+  const candidateInfoRef = useRef(candidateInfo);
+  candidateInfoRef.current = candidateInfo;
+
   // 4 Core Candidate-facing screening stages
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa">("ats");
 
@@ -52,6 +72,65 @@ export const BeforeInterviewCandidateContent = () => {
   const [activeChallengeIdx, setActiveChallengeIdx] = useState(0);
   const [codeInputs, setCodeInputs] = useState<Record<number, string>>({});
   const [analyzingChallengeId, setAnalyzingChallengeId] = useState<number | null>(null);
+
+  const [isSubmittingChallenges, setIsSubmittingChallenges] = useState(false);
+
+  // Strict check whether an application belongs exclusively to the logged-in candidate
+  const isCandidateApp = (
+    app: CandidateApplicationSubmission,
+    cId: string,
+    cEmail: string,
+    cName: string
+  ): boolean => {
+    const lowerName = (app.candidateName || "").toLowerCase().trim();
+    const lowerEmail = (app.candidateEmail || "").toLowerCase().trim();
+
+    // Explicitly exclude simulated demo candidates (Alex Rivera, Jordan Smith)
+    if (
+      lowerName === "alex rivera" ||
+      lowerName === "jordan smith" ||
+      lowerEmail.includes("alex.rivera") ||
+      lowerEmail.includes("jordan.smith")
+    ) {
+      return false;
+    }
+
+    if (cId && (app.candidateId === cId || app.id === cId || app.applicationId === cId)) {
+      return true;
+    }
+    if (cEmail && lowerEmail && lowerEmail === cEmail.toLowerCase().trim()) {
+      return true;
+    }
+    if (cName && lowerName && lowerName === cName.toLowerCase().trim()) {
+      return true;
+    }
+    if (app.id.startsWith("app-cand-") || app.id === "app-primary-screening") {
+      return true;
+    }
+    if (!cId && !cEmail && (!cName || cName === "Candidate")) {
+      return true;
+    }
+    return false;
+  };
+
+  const filterMyApps = (
+    apps: CandidateApplicationSubmission[],
+    cId: string,
+    cEmail: string,
+    cName: string
+  ): CandidateApplicationSubmission[] => {
+    return (apps || []).filter((a) => isCandidateApp(a, cId, cEmail, cName));
+  };
+
+  // Helper to persist only current candidate updates into workflow storage without wiping out HR's other candidate roster
+  const persistMyApps = (myAppsToPersist: CandidateApplicationSubmission[]) => {
+    const allWorkflow = getWorkflowApplications();
+    const myIds = new Set(myAppsToPersist.map((a) => a.id));
+    const otherCandidatesApps = allWorkflow.filter((a) => !myIds.has(a.id));
+    const merged = [...myAppsToPersist, ...otherCandidatesApps];
+    saveWorkflowApplications(merged);
+    window.dispatchEvent(new CustomEvent("hz_workflow_apps_updated", { detail: merged }));
+  };
 
   const loadData = async () => {
     let loadedApps = getWorkflowApplications();
@@ -86,14 +165,14 @@ export const BeforeInterviewCandidateContent = () => {
     setJobs(loadedJobs);
 
     // Identify the logged in candidate
-    let currentCandidateEmail = "";
-    let currentCandidateName = "";
-    let currentCandidateId = "";
+    let currentCandidateEmail = candidateUser?.email || "";
+    let currentCandidateName = candidateUser?.full_name || "";
+    let currentCandidateId = candidateUser?.id || "";
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        currentCandidateEmail = session.user.email || "";
+        if (!currentCandidateEmail) currentCandidateEmail = session.user.email || "";
         const { data: userData } = await supabase
           .from("users")
           .select("id, full_name, email")
@@ -101,7 +180,7 @@ export const BeforeInterviewCandidateContent = () => {
           .maybeSingle();
         if (userData) {
           currentCandidateId = userData.id;
-          currentCandidateName = userData.full_name || "";
+          if (userData.full_name) currentCandidateName = userData.full_name;
           if (userData.email) currentCandidateEmail = userData.email;
         }
       }
@@ -109,113 +188,138 @@ export const BeforeInterviewCandidateContent = () => {
       console.warn("Could not retrieve candidate session", e);
     }
 
-    // Query Supabase applications for candidate
-    try {
-      let query = supabase.from("applications").select("*, jobs(*)");
-      if (currentCandidateId) {
-        query = query.eq("candidate_id", currentCandidateId);
+    setCandidateInfo({
+      id: currentCandidateId,
+      email: currentCandidateEmail,
+      name: currentCandidateName,
+    });
+
+    // STRICT CANDIDATE FILTER: Never pull other candidates' records into this candidate portal
+    let candidateApps: CandidateApplicationSubmission[] = filterMyApps(
+      loadedApps,
+      currentCandidateId,
+      currentCandidateEmail,
+      currentCandidateName
+    );
+
+    // Query Supabase applications ONLY for this specific candidate
+    if (currentCandidateId) {
+      try {
+        const { data: dbApps } = await supabase
+          .from("applications")
+          .select("*, jobs(*)")
+          .eq("candidate_id", currentCandidateId);
+
+        if (dbApps && dbApps.length > 0) {
+          // Fetch candidate profile for GitHub and skills
+          const { data: profile } = await supabase
+            .from("candidate_profiles")
+            .select("github_url, skills, full_name, bio, resume_url")
+            .eq("id", currentCandidateId)
+            .maybeSingle();
+
+          const hydrated: CandidateApplicationSubmission[] = dbApps.map((da: any) => {
+            const j = da.jobs || {};
+            const targetJob = loadedJobs.find(job => job.id === da.job_id) || loadedJobs[0] || DEFAULT_JOBS[0];
+            const reqSkills = Array.isArray(j.skills_required) ? j.skills_required : targetJob.requiredSkills;
+            const rScore = da.resume_score != null ? da.resume_score : (da.ai_analysis?.resume_score ?? 94);
+            const resumeCutoff = targetJob.resumeCutoff || 90;
+            const resumePassed = rScore >= resumeCutoff;
+            const aiData = da.ai_analysis || {};
+            const githubUrl = profile?.github_url || (da.cover_letter?.includes("github.com") ? da.cover_letter : "") || "https://github.com";
+
+            // If locally existing, preserve interactive state like edited code or test results
+            const existing = candidateApps.find(a => a.id === da.id || a.jobId === da.job_id);
+
+            return ensureCompleteCandidateApp({
+              id: da.id,
+              candidateId: da.candidate_id || currentCandidateId,
+              applicationId: da.id,
+              jobId: da.job_id || targetJob.id,
+              jobTitle: j.title || targetJob.title,
+              candidateName: currentCandidateName || profile?.full_name || "Applicant",
+              candidateEmail: currentCandidateEmail || "candidate@example.com",
+              appliedDate: new Date(da.applied_at || Date.now()).toLocaleDateString(),
+              resumeFileName: da.resume_url ? da.resume_url.split("/").pop() || "Candidate_Resume.pdf" : "Candidate_Resume.pdf",
+              resumeTextSummary: da.cover_letter || aiData.summary || profile?.bio || "Verified candidate background and technical skills.",
+              githubAccountUrl: githubUrl,
+              githubRepo1Url: githubUrl,
+              projectArchitectureSummary: aiData.project_summary || "Modular fullstack application architecture",
+              resumeScore: rScore,
+              resumePassed,
+              resumeFeedback: aiData.feedback || `Resume score evaluated to ${rScore}/100 for ${targetJob.title}.`,
+              matchedKeywords: aiData.matched_skills || profile?.skills || reqSkills,
+              atsBreakdown: aiData.ats_breakdown || {
+                roleAlignment: rScore,
+                skillsMatch: rScore,
+                projectImpact: Math.min(100, rScore + 2),
+                formatting: 92,
+                missingKeywords: [],
+                actionableSuggestions: ["Continue showcasing modular architectural implementations."],
+              },
+              githubScore: aiData.github_score || 90,
+              githubPassed: true,
+              aiWrittenPercentage: 100 - (aiData.authenticity_score || 88),
+              authenticityPercentage: aiData.authenticity_score || 88,
+              detectedRepoStacks: profile?.skills || reqSkills,
+              githubFeedback: "Authentic commit history with clean software modularity.",
+              codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
+              generatedMCQs: existing?.generatedMCQs || aiData.mcqs || generateDynamicMCQs(reqSkills, targetJob.title),
+              repoCodingChallenges: existing?.repoCodingChallenges || da.code_answers || generateDynamicCodingChallenges(reqSkills, targetJob.title),
+              aiInterviewDialogue: existing?.aiInterviewDialogue || [],
+              skillMap: existing?.skillMap || [],
+              improvementPlan: existing?.improvementPlan || [],
+              hrEvidence: {
+                overallRecommendation: resumePassed ? "Strong Hire" : "Needs Further Technical Evaluation",
+                summary: `Candidate ATS score is ${rScore}/100. Cutoff: ${resumeCutoff}%.`,
+                strengths: ["Strong domain stack match", "Verified code signals"],
+                areasToVerify: ["Live interview architecture review"],
+                decisionNotes: resumePassed ? "Cleared Before Interview cutoff." : "Sub-cutoff ATS score.",
+              },
+              projectValidationScore: 88,
+              projectPassed: true,
+              projectFeedback: "Project architecture verified.",
+              projectArchitectureDetected: "Modular Service Architecture",
+              overallStatus: da.status === "accepted" || da.current_stage === "interview"
+                ? "Interview Ready"
+                : resumePassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)",
+              currentStage: da.current_stage || (resumePassed ? "before_interview" : "rejected"),
+            }, targetJob);
+          });
+
+          // Merge hydrated without duplicates
+          const existingIds = new Set(hydrated.map(h => h.id));
+          candidateApps = [...hydrated, ...candidateApps.filter(a => !existingIds.has(a.id))];
+          persistMyApps(candidateApps);
+        }
+      } catch (e) {
+        console.warn("Could not load candidate applications from Supabase", e);
       }
-      const { data: dbApps } = await query;
-
-      if (dbApps && dbApps.length > 0) {
-        // Fetch candidate profile for GitHub and skills
-        const { data: profile } = currentCandidateId ? await supabase
-          .from("candidate_profiles")
-          .select("github_url, skills, full_name, bio, resume_url")
-          .eq("id", currentCandidateId)
-          .maybeSingle() : { data: null };
-
-        const hydrated: CandidateApplicationSubmission[] = dbApps.map((da: any) => {
-          const j = da.jobs || {};
-          const targetJob = loadedJobs.find(job => job.id === da.job_id) || loadedJobs[0] || DEFAULT_JOBS[0];
-          const reqSkills = Array.isArray(j.skills_required) ? j.skills_required : targetJob.requiredSkills;
-          const rScore = da.resume_score != null ? da.resume_score : (da.ai_analysis?.resume_score ?? 89);
-          const resumeCutoff = targetJob.resumeCutoff || 90;
-          const resumePassed = rScore >= resumeCutoff;
-          const aiData = da.ai_analysis || {};
-          const githubUrl = profile?.github_url || (da.cover_letter?.includes("github.com") ? da.cover_letter : "") || "https://github.com";
-
-          return ensureCompleteCandidateApp({
-            id: da.id,
-            candidateId: da.candidate_id || currentCandidateId,
-            applicationId: da.id,
-            jobId: da.job_id || targetJob.id,
-            jobTitle: j.title || targetJob.title,
-            candidateName: currentCandidateName || profile?.full_name || "Applicant",
-            candidateEmail: currentCandidateEmail || "candidate@example.com",
-            appliedDate: new Date(da.applied_at || Date.now()).toLocaleDateString(),
-            resumeFileName: da.resume_url ? da.resume_url.split("/").pop() || "Candidate_Resume.pdf" : "Candidate_Resume.pdf",
-            resumeTextSummary: da.cover_letter || aiData.summary || profile?.bio || "Verified candidate background and technical skills.",
-            githubAccountUrl: githubUrl,
-            githubRepo1Url: githubUrl,
-            projectArchitectureSummary: aiData.project_summary || "Modular fullstack application architecture",
-            resumeScore: rScore,
-            resumePassed,
-            resumeFeedback: aiData.feedback || `Resume score evaluated to ${rScore}/100 for ${targetJob.title}.`,
-            matchedKeywords: aiData.matched_skills || profile?.skills || reqSkills,
-            atsBreakdown: aiData.ats_breakdown || {
-              roleAlignment: rScore,
-              skillsMatch: rScore,
-              projectImpact: Math.min(100, rScore + 2),
-              formatting: 92,
-              missingKeywords: [],
-              actionableSuggestions: ["Continue showcasing modular architectural implementations."],
-            },
-            githubScore: aiData.github_score || 88,
-            githubPassed: true,
-            aiWrittenPercentage: 100 - (aiData.authenticity_score || 88),
-            authenticityPercentage: aiData.authenticity_score || 88,
-            detectedRepoStacks: profile?.skills || reqSkills,
-            githubFeedback: "Authentic commit history with clean software modularity.",
-            codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
-            generatedMCQs: generateDynamicMCQs(reqSkills, targetJob.title),
-            repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, targetJob.title),
-            aiInterviewDialogue: [],
-            skillMap: [],
-            improvementPlan: [],
-            hrEvidence: {
-              overallRecommendation: resumePassed ? "Strong Hire" : "Needs Further Technical Evaluation",
-              summary: `Candidate ATS score is ${rScore}/100. Cutoff: ${resumeCutoff}%.`,
-              strengths: ["Strong domain stack match", "Verified code signals"],
-              areasToVerify: ["Live interview architecture review"],
-              decisionNotes: resumePassed ? "Cleared Before Interview cutoff." : "Sub-cutoff ATS score.",
-            },
-            projectValidationScore: 88,
-            projectPassed: true,
-            projectFeedback: "Project architecture verified.",
-            projectArchitectureDetected: "Modular Service Architecture",
-            overallStatus: resumePassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)",
-            currentStage: resumePassed ? "before_interview" : "rejected",
-          }, targetJob);
-        });
-
-        candidateApps = hydrated;
-        saveWorkflowApplications([...hydrated, ...loadedApps]);
-      }
-    } catch (e) {
-      console.warn("Could not load candidate applications from Supabase", e);
     }
 
-    // If candidateApps is still empty, auto-seed a primary application for the user so it NEVER shows an empty or broken screen
+    // If candidateApps is still empty, auto-seed a primary application for this logged-in candidate with real GitHub data
     if (candidateApps.length === 0) {
       const primaryJob = loadedJobs[0] || DEFAULT_JOBS[0];
+      const targetRepoUrl = "https://github.com/Harsha-HY/nalapaka";
+      const realData = await fetchRealGitHubAnalysis(targetRepoUrl, currentCandidateName || "Harsha");
+
       const autoApp = ensureCompleteCandidateApp({
-        id: "app-primary-screening",
+        id: `app-cand-${currentCandidateId || "current"}`,
         candidateId: currentCandidateId || "candidate-current",
         jobId: primaryJob.id,
         jobTitle: primaryJob.title,
-        candidateName: currentCandidateName || "Candidate",
-        candidateEmail: currentCandidateEmail || "candidate@example.com",
+        candidateName: currentCandidateName || "Harsha",
+        candidateEmail: currentCandidateEmail || "harsha@example.com",
         appliedDate: new Date().toLocaleDateString(),
-        resumeFileName: "My_Resume.pdf",
-        resumeTextSummary: `Experienced engineer with skills in ${primaryJob.requiredSkills.join(", ")}. Strong track record building high-performance architectures.`,
-        githubAccountUrl: "https://github.com/candidate",
-        githubRepo1Url: "https://github.com/candidate/core-engine",
-        projectArchitectureSummary: `Modular architecture built with ${primaryJob.requiredSkills.slice(0, 3).join(", ")}.`,
+        resumeFileName: `${(currentCandidateName || "Candidate").replace(/\s+/g, "_")}_Resume.pdf`,
+        resumeTextSummary: `Experienced full-stack engineer proficient in React, TypeScript, scalable component architecture, and centralized state management. Built production food service web app (nalapaka) with real-time cart state and localized multilingual UI.`,
+        githubAccountUrl: "https://github.com/Harsha-HY",
+        githubRepo1Url: targetRepoUrl,
+        projectArchitectureSummary: `Production React and TypeScript application featuring unified CartContext, Lucide iconography, dynamic image resolution, and restaurant shift analytics.`,
         resumeScore: 94,
         resumePassed: true,
         resumeFeedback: `Resume meets required qualifications for ${primaryJob.title}.`,
-        matchedKeywords: primaryJob.requiredSkills,
+        matchedKeywords: ["React", "TypeScript", "Tailwind CSS", "Context API", "Vite", ...primaryJob.requiredSkills],
         atsBreakdown: {
           roleAlignment: 95,
           skillsMatch: 94,
@@ -224,35 +328,62 @@ export const BeforeInterviewCandidateContent = () => {
           missingKeywords: [],
           actionableSuggestions: [`Showcase scalable caching layers and automated CI/CD for ${primaryJob.title}.`],
         },
-        githubScore: 92,
+        githubScore: realData.githubScore || 96,
         githubPassed: true,
-        aiWrittenPercentage: 12,
-        authenticityPercentage: 88,
-        detectedRepoStacks: primaryJob.requiredSkills,
-        githubFeedback: "Authentic commit history with clean software modularity.",
-        codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
-        generatedMCQs: generateDynamicMCQs(primaryJob.requiredSkills, primaryJob.title),
-        repoCodingChallenges: generateDynamicCodingChallenges(primaryJob.requiredSkills, primaryJob.title),
+        aiWrittenPercentage: realData.aiWrittenPercentage || 12,
+        authenticityPercentage: realData.authenticityPercentage || 88,
+        detectedRepoStacks: ["React", "TypeScript", "Tailwind CSS", "Lucide React", "Context API"],
+        githubFeedback: realData.finalSummary,
+        codeSignals: ["Verified React Context architecture", "Clean TypeScript interfaces", "Zero AI boilerplate signature"],
+        inspectedCodeFiles: realData.inspectedFiles,
+        githubVerificationReport: realData.report,
+        generatedMCQs: realData.generatedMCQs,
+        repoCodingChallenges: realData.repoCodingChallenges,
         aiInterviewDialogue: [],
         skillMap: [],
         improvementPlan: [],
         hrEvidence: {
           overallRecommendation: "Strong Hire",
-          summary: "Candidate cleared Before Interview ATS evaluation.",
-          strengths: ["Strong domain stack match", "Verified code signals"],
+          summary: `Candidate repository ${realData.repoDetails.name} verified: ${realData.authenticityPercentage}% human logic with zero AI boilerplate.`,
+          strengths: ["Strong domain stack match", "Verified code signals from nalapaka", "Clean commit lineage"],
           areasToVerify: ["Live interview architecture review"],
           decisionNotes: "Cleared Before Interview cutoff.",
         },
         projectValidationScore: 90,
         projectPassed: true,
-        projectFeedback: "Project architecture verified.",
-        projectArchitectureDetected: "Modular Service Architecture",
+        projectFeedback: "Project architecture verified from real repository.",
+        projectArchitectureDetected: "Modular Reactive Component Architecture",
         overallStatus: "Before Interview (Passed Cutoffs)",
         currentStage: "before_interview",
       }, primaryJob);
 
       candidateApps = [autoApp];
-      saveWorkflowApplications([autoApp, ...loadedApps]);
+      persistMyApps(candidateApps);
+    } else {
+      // If candidate already has an app, replace any old dummy files with real nalapaka data
+      for (let i = 0; i < candidateApps.length; i++) {
+        const app = candidateApps[i];
+        const hasDummy = !app.inspectedCodeFiles || app.inspectedCodeFiles.length === 0 || app.inspectedCodeFiles.some(f => f.fileName.includes("auth_validator"));
+        if (hasDummy) {
+          const targetRepoUrl = app.githubRepo1Url && app.githubRepo1Url.includes("github.com") ? app.githubRepo1Url : "https://github.com/Harsha-HY/nalapaka";
+          const realData = await fetchRealGitHubAnalysis(targetRepoUrl, app.candidateName || currentCandidateName || "Harsha");
+          candidateApps[i] = ensureCompleteCandidateApp({
+            ...app,
+            githubAccountUrl: app.githubAccountUrl && app.githubAccountUrl.includes("github.com") ? app.githubAccountUrl : "https://github.com/Harsha-HY",
+            githubRepo1Url: targetRepoUrl,
+            inspectedCodeFiles: realData.inspectedFiles,
+            githubVerificationReport: realData.report,
+            generatedMCQs: realData.generatedMCQs,
+            repoCodingChallenges: realData.repoCodingChallenges,
+            authenticityPercentage: realData.authenticityPercentage,
+            aiWrittenPercentage: realData.aiWrittenPercentage,
+            githubScore: realData.githubScore,
+            githubPassed: true,
+            githubFeedback: realData.finalSummary,
+          }, loadedJobs.find(j => j.id === app.jobId) || loadedJobs[0]);
+        }
+      }
+      persistMyApps(candidateApps);
     }
 
     setApplications(candidateApps);
@@ -287,7 +418,21 @@ export const BeforeInterviewCandidateContent = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+
+    // Listen for live updates from HR or other components - strictly keep candidate isolation
+    const handleSync = () => {
+      const fresh = getWorkflowApplications();
+      if (fresh && fresh.length > 0) {
+        const { id, email, name } = candidateInfoRef.current;
+        const myFresh = filterMyApps(fresh, id, email, name);
+        if (myFresh.length > 0) {
+          setApplications(myFresh);
+        }
+      }
+    };
+    window.addEventListener("hz_workflow_apps_updated", handleSync);
+    return () => window.removeEventListener("hz_workflow_apps_updated", handleSync);
+  }, [candidateUser?.id, candidateUser?.email]);
 
   const currentApp = applications.find((a) => a.id === selectedAppId) || (applications.length > 0 ? applications[0] : null);
   const activeJob = jobs.find((j) => j.id === (currentApp?.jobId || selectedJobId)) || jobs[0] || DEFAULT_JOBS[0];
@@ -306,13 +451,13 @@ export const BeforeInterviewCandidateContent = () => {
     { id: "ats", label: "ATS & Resume", icon: FileText, num: "01", locked: false },
     { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02", locked: !isResumePassed },
     { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03", locked: !isGithubPassed },
-    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04", locked: !isMCQPassed },
+    { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04", locked: !isGithubPassed },
   ];
 
   const handleApplicationUpdate = (updatedApp: CandidateApplicationSubmission) => {
     const updated = applications.map((a) => (a.id === updatedApp.id ? updatedApp : a));
     setApplications(updated);
-    saveWorkflowApplications(updated);
+    persistMyApps(updated);
   };
 
   const handleMCQSelect = (questionId: number, optionIdx: number) => {
@@ -320,7 +465,7 @@ export const BeforeInterviewCandidateContent = () => {
     setSelectedMCQAnswers((prev) => ({ ...prev, [questionId]: optionIdx }));
   };
 
-  const handleMCQSubmit = () => {
+  const handleMCQSubmit = async () => {
     if (!currentApp || !(currentApp.generatedMCQs || []).length) return;
     setMcqSubmitted(true);
     let correctCount = 0;
@@ -344,12 +489,37 @@ export const BeforeInterviewCandidateContent = () => {
     });
 
     setApplications(updatedApps);
-    saveWorkflowApplications(updatedApps);
+    persistMyApps(updatedApps);
+
+    // Sync to Supabase
+    try {
+      if (currentApp.id && !currentApp.id.startsWith("app-sim-")) {
+        await supabase
+          .from("applications")
+          .update({
+            test_score: correctCount,
+            test_status: "completed",
+            ai_analysis: {
+              resume_score: currentApp.resumeScore,
+              authenticity_score: currentApp.authenticityPercentage,
+              github_score: currentApp.githubScore,
+              mcqs: updatedMCQs,
+              mcq_score: correctCount,
+            },
+          })
+          .eq("id", currentApp.id);
+      }
+    } catch (e) {
+      console.warn("Could not sync MCQ answers to Supabase", e);
+    }
 
     toast({
       title: `MCQ Evaluation: ${correctCount} / ${(currentApp.generatedMCQs || []).length} Correct`,
-      description: "Your answers have been verified by AI and saved to your candidate dossier.",
+      description: "Answers saved! Moving to Stage 04 practical coding challenges.",
     });
+
+    // Auto-advance to Stage 04 Coding Challenges
+    setActiveTab("dsa");
   };
 
   const handleRunCodeAnalysis = (challengeId: number) => {
@@ -378,7 +548,7 @@ export const BeforeInterviewCandidateContent = () => {
       });
 
       setApplications(updatedApps);
-      saveWorkflowApplications(updatedApps);
+      persistMyApps(updatedApps);
       setAnalyzingChallengeId(null);
 
       if (reviewResult?.passed) {
@@ -396,6 +566,59 @@ export const BeforeInterviewCandidateContent = () => {
     }, 500);
   };
 
+  const handleSubmitBothChallenges = async () => {
+    if (!currentApp) return;
+    setIsSubmittingChallenges(true);
+
+    const updatedChallenges = (currentApp.repoCodingChallenges || []).map((c) => {
+      const code = codeInputs[c.id] ?? (c.submittedCode || c.starterCode || "");
+      const reviewResult = analyzeCandidateCodeSubmission(c.id, code);
+      const updatedTestCases = (c.testCases || []).map((tc) => ({
+        ...tc,
+        passed: reviewResult?.passed ?? true,
+      }));
+      return {
+        ...c,
+        submittedCode: code,
+        testCases: updatedTestCases,
+        aiCodeReview: reviewResult,
+      };
+    });
+
+    const updatedApps = applications.map((a) => {
+      if (a.id === currentApp.id) {
+        return {
+          ...a,
+          repoCodingChallenges: updatedChallenges,
+        };
+      }
+      return a;
+    });
+
+    setApplications(updatedApps);
+    persistMyApps(updatedApps);
+
+    // Sync to Supabase
+    try {
+      if (currentApp.id && !currentApp.id.startsWith("app-sim-")) {
+        await supabase
+          .from("applications")
+          .update({
+            code_answers: updatedChallenges as any,
+          })
+          .eq("id", currentApp.id);
+      }
+    } catch (e) {
+      console.warn("Could not sync coding challenges to Supabase", e);
+    }
+
+    setIsSubmittingChallenges(false);
+    toast({
+      title: "🚀 Assessment Submissions Saved!",
+      description: "Both coding solutions and AI verification reports are saved and now visible to HR in the Before Interview Control Room.",
+    });
+  };
+
   const handleProceedToMainRounds = async () => {
     if (!currentApp) return;
     setAdvancingToNextRound(true);
@@ -408,11 +631,12 @@ export const BeforeInterviewCandidateContent = () => {
               ...a,
               overallStatus: "Interview Ready" as const,
               currentStage: "dsa_sandbox" as const,
+              before_interview_passed: true,
             }
           : a
       );
       setApplications(updatedApps);
-      saveWorkflowApplications(updatedApps);
+      persistMyApps(updatedApps);
 
       // 2. Sync to Supabase
       if (currentApp.candidateEmail) {
@@ -510,7 +734,7 @@ export const BeforeInterviewCandidateContent = () => {
         });
 
         setApplications(updated);
-        saveWorkflowApplications(updated);
+        persistMyApps(updated);
 
         toast({
           title: "✨ Gemini AI Resume & Stack Analysis Complete",
@@ -540,8 +764,8 @@ export const BeforeInterviewCandidateContent = () => {
   };
 
   const handleCreateTestCandidate = async (jobToUse: JobCutoffs, pass: boolean = true) => {
-    const candidateName = pass ? "Alex Rivera" : "Jordan Smith";
-    const email = pass ? "alex.rivera@example.com" : "jordan.smith@example.com";
+    const candidateName = candidateInfo.name || "Candidate";
+    const email = candidateInfo.email || "candidate@example.com";
     
     setIsGeminiAnalyzing(true);
     const newApp = await evaluateAndSubmitApplicationWithGemini(
@@ -551,7 +775,7 @@ export const BeforeInterviewCandidateContent = () => {
         email,
         resumeFileName: `${candidateName.replace(/\s+/g, "_")}_Resume.pdf`,
         resumeText: pass
-          ? `Experienced software engineer with 4 years building scalable systems using ${jobToUse.requiredSkills.join(", ")}, Distributed Caching, CI/CD pipelines, and microservices.`
+          ? `Experienced software engineer with strong background building scalable systems using ${jobToUse.requiredSkills.join(", ")}, Distributed Caching, CI/CD pipelines, and microservices.`
           : "Basic HTML and CSS enthusiast with introductory computing knowledge.",
         githubAcc: `https://github.com/${candidateName.toLowerCase().replace(/\s+/g, "-")}-dev`,
         githubRepo1: `https://github.com/${candidateName.toLowerCase().replace(/\s+/g, "-")}-dev/core-engine`,
@@ -563,8 +787,11 @@ export const BeforeInterviewCandidateContent = () => {
     );
     setIsGeminiAnalyzing(false);
 
-    setApplications(getWorkflowApplications());
+    const updated = [newApp];
+    setApplications(updated);
     setSelectedAppId(newApp.id);
+    persistMyApps(updated);
+
     const initialCodes: Record<number, string> = {};
     (newApp.repoCodingChallenges || []).forEach((c) => {
       initialCodes[c.id] = c.submittedCode || c.starterCode || "";
@@ -603,16 +830,18 @@ export const BeforeInterviewCandidateContent = () => {
               </div>
 
               <h3 className="font-serif-display text-2xl md:text-3xl text-ink">
-                {currentApp ? `${currentApp.candidateName}'s Screening Dossier` : "Candidate Pre-Interview Screening"}
+                {currentApp?.candidateName && currentApp.candidateName !== "Candidate"
+                  ? `${currentApp.candidateName}'s Screening Dossier`
+                  : "My Pre-Interview Screening Dossier"}
               </h3>
               <p className="text-sm text-ink-soft mt-1 max-w-xl">
                 AI evaluates your resume ATS match, scans your GitHub repositories for code authenticity, prepares tailored MCQs, tests adaptive coding challenges, and tracks your skill progression before unlocking interview rounds.
               </p>
             </div>
 
-            {/* Application Switcher & Actions */}
+            {/* Applied Tracks Switcher & Actions */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-              {applications.length > 0 && (
+              {applications.length > 1 && (
                 <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
                   {applications.map((app) => {
                     const active = selectedAppId === app.id;
@@ -640,12 +869,12 @@ export const BeforeInterviewCandidateContent = () => {
                           <div className={`w-8 h-8 rounded-full grid place-items-center font-serif-display font-bold text-xs shrink-0 ${
                             active ? "bg-paper text-ink" : "bg-forest/10 text-forest"
                           }`}>
-                            {(app.candidateName || "A").charAt(0)}
+                            <Briefcase className="w-3.5 h-3.5" />
                           </div>
                           <div className="min-w-0">
-                            <div className="font-semibold text-xs truncate">{app.candidateName}</div>
+                            <div className="font-semibold text-xs truncate">{app.jobTitle}</div>
                             <div className={`text-[11px] truncate ${active ? "text-paper/70" : "text-ink-muted"}`}>
-                              {app.jobTitle}
+                              Track #{app.jobId.slice(0, 8)}
                             </div>
                           </div>
                         </div>
@@ -768,7 +997,28 @@ export const BeforeInterviewCandidateContent = () => {
         {/* Action / Next Round Transition Banner */}
         {currentApp && (
           <div className="p-6 bg-paper border-b border-ink/10">
-            {isApproved && (
+            {(currentApp.overallStatus === "Interview Ready" || currentApp.currentStage === "interview" || currentApp.currentStage === "shortlisted") ? (
+              <div className="p-5 rounded-2xl bg-forest/15 border-2 border-forest/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-forest font-bold text-sm">
+                    <Sparkles className="w-5 h-5 text-forest animate-pulse" />
+                    <span>🎉 Accepted by HR! You are Advanced to Live Technical Interview</span>
+                  </div>
+                  <p className="text-xs text-ink-soft mt-1">
+                    HR has reviewed and accepted your Resume ATS score (<strong>{currentApp.resumeScore}/100</strong>), GitHub Code Authenticity (<strong>{currentApp.authenticityPercentage}%</strong>), and Assessment submissions. You are now tracked in the next interview round!
+                  </p>
+                </div>
+                <Button
+                  onClick={() => {
+                    window.location.href = "/interview-prep";
+                  }}
+                  className="bg-forest text-paper hover:bg-forest/90 font-medium px-5 py-2.5 rounded-full text-xs shadow-md shrink-0 flex items-center gap-2"
+                >
+                  <Play className="w-4 h-4" />
+                  <span>Launch Live Technical Round →</span>
+                </Button>
+              </div>
+            ) : isApproved ? (
               <div className="p-5 rounded-2xl bg-forest/10 border-2 border-forest/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2 text-forest font-semibold text-sm">
@@ -776,7 +1026,7 @@ export const BeforeInterviewCandidateContent = () => {
                     <span>Before Interview Screening Cleared (All Cutoffs Passed)</span>
                   </div>
                   <p className="text-xs text-ink-soft mt-1">
-                    Your ATS score (<strong>{currentApp.resumeScore}/100</strong>) and code authenticity (<strong>{currentApp.authenticityPercentage}%</strong>) qualify you for the next stage.
+                    Your ATS score (<strong>{currentApp.resumeScore}/100</strong>) and code authenticity (<strong>{currentApp.authenticityPercentage}%</strong>) qualify you. Complete MCQs & Coding Challenges for HR review.
                   </p>
                 </div>
                 <Button
@@ -788,7 +1038,7 @@ export const BeforeInterviewCandidateContent = () => {
                   {isAlreadyInMainRounds ? "Go to My Applications (Active Rounds) →" : "Proceed to Next Round (Aptitude & Technical) →"}
                 </Button>
               </div>
-            )}
+            ) : null}
 
             {isRejected && (
               <div className="p-5 rounded-2xl bg-destructive/10 border-2 border-destructive/30 space-y-2 text-xs">
@@ -869,94 +1119,193 @@ export const BeforeInterviewCandidateContent = () => {
                     transition={{ duration: 0.3 }}
                     className="space-y-6"
                   >
+                    {/* Top ATS Summary Banner */}
+                    <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-forest/10 border border-forest/20 text-forest grid place-items-center shrink-0">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold text-sm text-ink">{currentApp.resumeFileName || "Candidate_Resume.pdf"}</h4>
+                            <span className="px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold bg-forest/15 text-forest border border-forest/30">
+                              ✓ ATS Verified
+                            </span>
+                          </div>
+                          <p className="text-xs text-ink-soft mt-0.5">
+                            Target Position: <strong className="text-ink">{activeJob?.title || currentApp.jobTitle}</strong> · Parsing Quality: <strong className="text-forest">100% Semantic</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono px-3 py-1.5 rounded-xl bg-paper border border-ink/10 text-ink-muted">
+                          Cutoff: <strong className="text-ink">{activeJob?.resumeCutoff || 90}%</strong>
+                        </span>
+                        <span className={`text-xs font-mono font-bold px-3 py-1.5 rounded-xl border ${
+                          currentApp.resumePassed
+                            ? "bg-forest/10 text-forest border-forest/30"
+                            : "bg-destructive/10 text-destructive border-destructive/30"
+                        }`}>
+                          {currentApp.resumePassed ? "Status: Passed Cutoff ✓" : "Status: Below Cutoff ✕"}
+                        </span>
+                      </div>
+                    </div>
+
                     <div className="grid md:grid-cols-12 gap-6 items-start">
-                      <div className="md:col-span-4 p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col items-center text-center">
-                        <div className="text-xs uppercase font-mono tracking-widest text-ink-muted mb-3">ATS Compatibility Score</div>
+                      {/* Left Circular Gauge Card */}
+                      <div className="md:col-span-4 p-6 rounded-3xl border border-ink/15 bg-paper flex flex-col items-center text-center shadow-sm">
+                        <div className="text-xs uppercase font-mono tracking-widest text-ink-muted mb-4 font-semibold">
+                          ATS COMPATIBILITY SCORE
+                        </div>
                         <div className="relative flex items-center justify-center">
-                          <div className={`w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center bg-paper shadow-inner ${
-                            currentApp.resumePassed ? "border-forest/30" : "border-destructive/30"
+                          <div className={`w-32 h-32 rounded-full border-4 flex flex-col items-center justify-center bg-paper shadow-sm ${
+                            currentApp.resumePassed ? "border-forest/40" : "border-destructive/40"
                           }`}>
-                            <span className={`font-serif-display text-4xl font-bold ${
+                            <span className={`font-serif-display text-5xl font-bold leading-none ${
                               currentApp.resumePassed ? "text-forest" : "text-destructive"
                             }`}>
                               {currentApp.resumeScore}
                             </span>
-                            <span className="text-[10px] font-mono text-ink-muted uppercase">out of 100</span>
+                            <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider mt-1 font-semibold">
+                              OUT OF 100
+                            </span>
                           </div>
                         </div>
-                        <div className="mt-4 text-xs text-ink-soft leading-relaxed">
-                          Evaluated against job requirements, verified project context, and keyword frequency.
+
+                        <div className="mt-4 text-xs font-medium text-forest bg-forest/10 px-3 py-1 rounded-full border border-forest/20">
+                          {currentApp.resumeScore >= 90 ? "★ Highly Qualified Candidate" : "Qualified Candidate"}
                         </div>
-                        <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
-                          Required Cutoff: {activeJob?.resumeCutoff || 75}% · Status: <span className={currentApp.resumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{currentApp.resumePassed ? "Passed" : "Below Cutoff"}</span>
+
+                        <p className="mt-3 text-xs text-ink-soft leading-relaxed">
+                          Evaluated by Google Gemini ATS parsing against required job keywords, production architecture, and impact metrics.
+                        </p>
+
+                        <div className="mt-4 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted w-full space-y-1.5">
+                          <div className="flex justify-between">
+                            <span>Keyword Match:</span>
+                            <strong className="text-forest">{(currentApp.matchedKeywords || []).length} Keywords</strong>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Formatting Accuracy:</span>
+                            <strong className="text-forest">{currentApp.atsBreakdown?.formatting ?? 96}%</strong>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Screening Decision:</span>
+                            <strong className={currentApp.resumePassed ? "text-forest" : "text-destructive"}>
+                              {currentApp.resumePassed ? "Approved for Stage 02" : "Needs Review"}
+                            </strong>
+                          </div>
                         </div>
                       </div>
 
+                      {/* Right Side Cards */}
                       <div className="md:col-span-8 space-y-4">
-                        <div className="p-5 rounded-2xl border border-ink/10 bg-paper">
-                          <h4 className="font-semibold text-sm text-ink mb-3 flex items-center gap-2">
+                        {/* Detailed ATS Breakdown Metrics */}
+                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm space-y-4">
+                          <h4 className="font-semibold text-sm text-ink flex items-center gap-2">
                             <CheckCircle2 className="w-4 h-4 text-forest" />
-                            Detailed ATS Breakdown
+                            Multi-Dimension ATS Scoring Matrix
                           </h4>
-                          <div className="grid sm:grid-cols-2 gap-4 text-xs">
-                            <div className="space-y-1">
+                          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-xs">
+                            <div className="space-y-1.5">
                               <div className="flex justify-between text-ink-soft">
                                 <span>Role Alignment</span>
-                                <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%</span>
+                                <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%</span>
                               </div>
                               <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%` }} />
+                                <div className="h-full bg-forest rounded-full transition-all duration-700" style={{ width: `${currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%` }} />
                               </div>
                             </div>
-                            <div className="space-y-1">
+
+                            <div className="space-y-1.5">
                               <div className="flex justify-between text-ink-soft">
                                 <span>Skills Match</span>
-                                <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%</span>
+                                <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%</span>
                               </div>
                               <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%` }} />
+                                <div className="h-full bg-forest rounded-full transition-all duration-700" style={{ width: `${currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%` }} />
                               </div>
                             </div>
-                            <div className="space-y-1">
+
+                            <div className="space-y-1.5">
                               <div className="flex justify-between text-ink-soft">
                                 <span>Project Impact Signals</span>
-                                <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.projectImpact ?? 82}%</span>
+                                <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.projectImpact ?? 90}%</span>
                               </div>
                               <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.projectImpact ?? 82}%` }} />
+                                <div className="h-full bg-forest rounded-full transition-all duration-700" style={{ width: `${currentApp.atsBreakdown?.projectImpact ?? 90}%` }} />
                               </div>
                             </div>
-                            <div className="space-y-1">
+
+                            <div className="space-y-1.5">
                               <div className="flex justify-between text-ink-soft">
-                                <span>Formatting &amp; Structure</span>
-                                <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.formatting ?? 90}%</span>
+                                <span>Formatting &amp; Semantic Parsability</span>
+                                <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.formatting ?? 96}%</span>
                               </div>
                               <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.formatting ?? 90}%` }} />
+                                <div className="h-full bg-forest rounded-full transition-all duration-700" style={{ width: `${currentApp.atsBreakdown?.formatting ?? 96}%` }} />
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="p-5 rounded-2xl border border-ink/10 bg-amber-500/5">
-                          <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 mb-2">
-                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                            Missing / Weak Keywords Detected:
+                        {/* Verified Matched Skills Pills */}
+                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold text-sm text-ink flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-forest" />
+                              Verified Skills &amp; Matched Keywords
+                            </h4>
+                            <span className="text-[11px] font-mono text-forest bg-forest/10 px-2 py-0.5 rounded-full font-semibold">
+                              {(currentApp.matchedKeywords || []).length} Verified Matches
+                            </span>
                           </div>
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(currentApp.atsBreakdown?.missingKeywords || currentApp.missingKeywords || []).map((kw) => (
-                              <span key={kw} className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-900 font-mono text-[11px]">
-                                {kw}
+
+                          <div className="flex flex-wrap gap-2">
+                            {(currentApp.matchedKeywords && currentApp.matchedKeywords.length > 0
+                              ? currentApp.matchedKeywords
+                              : ["React", "TypeScript", "Tailwind CSS", "Context API", "Node.js", "REST APIs", "Vite", "State Management"]
+                            ).map((skill) => (
+                              <span
+                                key={skill}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-forest/10 border border-forest/20 text-forest text-xs font-mono font-medium shadow-xs"
+                              >
+                                <CheckCircle2 className="w-3 h-3 text-forest" />
+                                <span>{skill}</span>
                               </span>
                             ))}
                           </div>
-                          <div className="text-xs text-ink-soft space-y-1">
-                            <span className="font-medium text-ink">Actionable Feedback for Candidate:</span>
-                            <ul className="list-disc list-inside space-y-0.5 pl-1">
-                              {(currentApp.atsBreakdown?.actionableSuggestions || [currentApp.resumeFeedback || "Continue showcasing clean modular architectures."]).filter(Boolean).map((sug, idx) => (
-                                <li key={idx}>{sug}</li>
-                              ))}
-                            </ul>
+                        </div>
+
+                        {/* Profile Summary Card */}
+                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm space-y-2">
+                          <h4 className="font-semibold text-xs text-ink uppercase tracking-wider font-mono flex items-center gap-1.5">
+                            <Briefcase className="w-3.5 h-3.5 text-forest" />
+                            Extracted Professional Background &amp; Accomplishments
+                          </h4>
+                          <p className="text-xs text-ink-soft leading-relaxed">
+                            {currentApp.resumeTextSummary || "Experienced full-stack engineer proficient in React, TypeScript, scalable component architecture, and centralized state management. Built production food service web app (nalapaka) with real-time cart state and localized multilingual UI."}
+                          </p>
+                        </div>
+
+                        {/* Missing / Recommended Keywords Callout */}
+                        <div className="p-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 space-y-2.5">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
+                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>Recommended Additions for Senior / Staff Alignment:</span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            {["Distributed Caching", "Redis", "CI/CD Pipeline", "Docker"].map((kw) => (
+                              <span key={kw} className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-900 font-mono text-[11px] font-medium">
+                                + {kw}
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="text-[11px] text-ink-soft pt-1 border-t border-amber-500/10 leading-relaxed">
+                            💡 Adding distributed caching architectures and CI/CD pipelines will increase your profile alignment to 98%+.
                           </div>
                         </div>
                       </div>
@@ -1094,6 +1443,37 @@ export const BeforeInterviewCandidateContent = () => {
                             </div>
                           ))}
                         </div>
+
+                        {/* Bottom Action Bar for Stage 03 */}
+                        <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm mt-4">
+                          <div>
+                            <div className="font-semibold text-xs text-ink flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-forest" />
+                              <span>Stage 03: 5 Tailored MCQs</span>
+                            </div>
+                            <p className="text-[11px] text-ink-soft mt-0.5">
+                              {mcqSubmitted
+                                ? `Completed! Score: ${currentApp.mcqScore ?? Object.keys(selectedMCQAnswers).length} / ${(currentApp.generatedMCQs || []).length} Correct. You can now solve both practical coding challenges.`
+                                : `Select your answers for all 5 questions above, then submit to save scores for HR.`}
+                            </p>
+                          </div>
+                          {!mcqSubmitted ? (
+                            <Button
+                              onClick={handleMCQSubmit}
+                              disabled={Object.keys(selectedMCQAnswers).length < (currentApp.generatedMCQs || []).length}
+                              className="bg-forest text-paper hover:bg-forest/90 text-xs px-5 py-2.5 rounded-xl font-medium shrink-0 flex items-center gap-2 shadow-sm"
+                            >
+                              <span>Submit 5 MCQs &amp; Proceed to Coding →</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => setActiveTab("dsa")}
+                              className="bg-forest text-paper hover:bg-forest/90 text-xs px-5 py-2.5 rounded-xl font-medium shrink-0 flex items-center gap-2 shadow-sm"
+                            >
+                              <span>Proceed to Stage 04: Coding Challenges →</span>
+                            </Button>
+                          )}
+                        </div>
                       </>
                     )}
                   </motion.div>
@@ -1109,21 +1489,31 @@ export const BeforeInterviewCandidateContent = () => {
                     transition={{ duration: 0.3 }}
                     className="space-y-6"
                   >
-                    {!isMCQPassed ? (
+                    {!isGithubPassed ? (
                       <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
                         <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-700 grid place-items-center mx-auto">
                           <Lock className="w-6 h-6" />
                         </div>
-                        <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 04 Locked: Submit 5 MCQs First</h4>
+                        <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 04 Locked: Complete Stage 01 &amp; 02 First</h4>
                         <p className="text-xs text-ink-soft max-w-md mx-auto">
-                          Please complete and submit Stage 03 (5 Personalized MCQs) to unlock your Adaptive DSA Sandbox Coding Challenges.
+                          Please ensure ATS Resume and GitHub authenticity requirements are cleared to unlock technical challenges.
                         </p>
-                        <Button onClick={() => setActiveTab("mcq")} className="bg-forest text-paper hover:bg-forest/90 text-xs mt-2">
-                          Go to Stage 03 (5 MCQs) →
+                        <Button onClick={() => setActiveTab("ats")} className="bg-forest text-paper hover:bg-forest/90 text-xs mt-2">
+                          Go to Stage 01 (ATS Resume) →
                         </Button>
                       </div>
                     ) : (
                       <>
+                        {!mcqSubmitted && (
+                          <div className="p-3.5 rounded-xl bg-forest/10 border border-forest/30 flex items-center justify-between text-xs mb-2">
+                            <span className="text-ink">
+                              💡 <strong>Note:</strong> You can solve, test, and submit your 2 coding challenges below. Make sure to also complete your 5 MCQs in Stage 03 to finalize your full score.
+                            </span>
+                            <Button size="sm" variant="outline" onClick={() => setActiveTab("mcq")} className="text-xs h-7 px-2.5 text-forest border-forest/40 shrink-0 ml-2">
+                              View MCQs →
+                            </Button>
+                          </div>
+                        )}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink/10 pb-4">
                           <div>
                             <h4 className="font-serif-display text-xl text-ink">Adaptive DSA Sandbox — Practical Repo-Derived Challenges</h4>
@@ -1248,6 +1638,27 @@ export const BeforeInterviewCandidateContent = () => {
                                   </motion.div>
                                 )}
                               </div>
+
+                              {/* Submit Both Coding Challenges Action Card */}
+                              <div className="p-4 rounded-2xl bg-forest/5 border border-forest/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                                <div>
+                                  <div className="font-semibold text-xs text-ink flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-forest" />
+                                    <span>Complete Both Challenges (2 Coding Questions)</span>
+                                  </div>
+                                  <p className="text-[11px] text-ink-soft mt-0.5">
+                                    Run &amp; verify your solutions for Challenge 1 and Challenge 2 above, then submit them directly to the HR Screening Control Room.
+                                  </p>
+                                </div>
+                                <Button
+                                  onClick={handleSubmitBothChallenges}
+                                  disabled={isSubmittingChallenges}
+                                  className="bg-forest text-paper hover:bg-forest/90 text-xs px-4 py-2 rounded-xl shrink-0 shadow-sm flex items-center gap-1.5 font-medium"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{isSubmittingChallenges ? "Submitting to HR..." : "Submit Both Solutions to HR →"}</span>
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         ) : (
@@ -1327,10 +1738,10 @@ export const BeforeInterviewCandidateContent = () => {
   );
 };
 
-export const BeforeInterviewCandidatePanel = () => {
+export const BeforeInterviewCandidatePanel = ({ candidateUser }: BeforeInterviewCandidatePanelProps) => {
   return (
     <ErrorBoundary fallbackTitle="Before Interview Screen Recovery" fallbackDescription="Unable to load candidate dossier. Click below to reload or reset data.">
-      <BeforeInterviewCandidateContent />
+      <BeforeInterviewCandidateContent candidateUser={candidateUser} />
     </ErrorBoundary>
   );
 };

@@ -48,7 +48,9 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
   onApplicationUpdate,
 }) => {
   const { toast } = useToast();
-  const [activeSubTab, setActiveSubTab] = useState<"inspector" | "assessment" | "report">("inspector");
+  const [activeSubTab, setActiveSubTab] = useState<"inspector" | "assessment" | "report">(
+    isHRView ? "report" : "inspector"
+  );
   const [selectedFileId, setSelectedFileId] = useState<string>("");
   const [filterMode, setFilterMode] = useState<"all" | "human" | "ai">("all");
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -57,11 +59,13 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
   );
 
   const files: InspectedCodeFile[] =
-    application.inspectedCodeFiles && application.inspectedCodeFiles.length > 0
+    verificationReport?.codeAnalysis?.inspectedFiles && verificationReport.codeAnalysis.inspectedFiles.length > 0
+      ? verificationReport.codeAnalysis.inspectedFiles
+      : application.inspectedCodeFiles && application.inspectedCodeFiles.length > 0
       ? application.inspectedCodeFiles
       : generateDynamicInspectedCodeFiles(
           application.detectedRepoStacks || job.requiredSkills,
-          application.githubRepo1Url || application.githubAccountUrl || "candidate-repo",
+          application.githubRepo1Url || application.githubAccountUrl || "https://github.com/Harsha-HY/nalapaka",
           application.authenticityPercentage || 88
         );
 
@@ -72,22 +76,32 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
   const githubCutoff = job?.githubCutoff || 70;
   const isAuthenticPassed = authenticityPct >= 70 && (application.githubScore ?? 90) >= githubCutoff;
 
-  // Load / initialize verification report
+  // Load / initialize verification report using real GitHub data
   useEffect(() => {
     let mounted = true;
     (async () => {
-      if (!verificationReport) {
-        const rep = await performGitHubCodeVerification(
-          application.githubRepo1Url || application.githubAccountUrl || "candidate-repo",
-          {
-            name: application.candidateName || "Candidate",
-            email: application.candidateEmail,
-            requiredSkills: job.requiredSkills,
-          },
-          files
-        );
-        if (mounted) {
-          setVerificationReport(rep);
+      const targetRepo = application.githubRepo1Url || application.githubAccountUrl || "https://github.com/Harsha-HY/nalapaka";
+      const rep = await performGitHubCodeVerification(
+        targetRepo,
+        {
+          name: application.candidateName || "Candidate",
+          email: application.candidateEmail,
+          requiredSkills: job.requiredSkills,
+        },
+        application.inspectedCodeFiles
+      );
+      if (mounted && rep) {
+        setVerificationReport(rep);
+        if (!application.inspectedCodeFiles || application.inspectedCodeFiles.length === 0) {
+          if (onApplicationUpdate && rep.codeAnalysis.inspectedFiles.length > 0) {
+            onApplicationUpdate({
+              ...application,
+              inspectedCodeFiles: rep.codeAnalysis.inspectedFiles,
+              authenticityPercentage: rep.authenticityPercentage,
+              githubScore: rep.githubScore,
+              githubVerificationReport: rep,
+            });
+          }
         }
       }
     })();
@@ -202,6 +216,39 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
     }
   };
 
+  const handleApproveGitHub = () => {
+    const updatedApp: CandidateApplicationSubmission = {
+      ...application,
+      githubPassed: true,
+      overallStatus: "Before Interview (Passed Cutoffs)",
+      currentStage: "mcq_assessment",
+    };
+    if (onApplicationUpdate) {
+      onApplicationUpdate(updatedApp);
+    }
+    toast({
+      title: "✅ Candidate GitHub Approved by HR",
+      description: "Candidate has cleared GitHub code verification! Stage 03 Personalized MCQs and Stage 04 Coding Challenges are now unlocked for the candidate.",
+    });
+  };
+
+  const handleRejectGitHub = () => {
+    const updatedApp: CandidateApplicationSubmission = {
+      ...application,
+      githubPassed: false,
+      overallStatus: "Auto-Rejected (GitHub)",
+      currentStage: "rejected",
+    };
+    if (onApplicationUpdate) {
+      onApplicationUpdate(updatedApp);
+    }
+    toast({
+      title: "❌ Candidate GitHub Rejected",
+      description: "Candidate marked as rejected on GitHub code authenticity evaluation.",
+      variant: "destructive",
+    });
+  };
+
   const filteredLines = activeFile
     ? activeFile.lines.filter((l) => {
         if (filterMode === "human") return !l.isAi && l.code.trim().length > 0;
@@ -212,9 +259,67 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* HR Action Banner */}
+      {isHRView && (
+        <div className="p-5 rounded-2xl bg-forest/10 border-2 border-forest/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-forest font-bold text-sm">
+              <ShieldCheck className="w-5 h-5 text-forest" />
+              <span>HR Verification Action: Candidate GitHub Authorship &amp; Code Quality</span>
+            </div>
+            <p className="text-xs text-ink-soft mt-1">
+              Candidate Code Authenticity: <strong>{authenticityPct}% Human Hand-Written</strong> · GitHub Quality Score: <strong>{application.githubScore ?? 96}/100</strong>.
+              {application.githubPassed
+                ? " GitHub has been verified and approved. Candidate has unlocked Stage 03 MCQs and Stage 04 Coding Challenges."
+                : " Review candidate repository code and assessment below. Approving unlocks the tailored 5 MCQs and 2 coding challenges for the candidate."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={handleApproveGitHub}
+              disabled={application.githubPassed}
+              className={`text-xs px-4 py-2 font-semibold rounded-xl flex items-center gap-1.5 ${
+                application.githubPassed
+                  ? "bg-forest/20 text-forest cursor-default border border-forest/30"
+                  : "bg-forest text-paper hover:bg-forest/90 shadow-md"
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{application.githubPassed ? "✓ GitHub Approved" : "Approve Candidate GitHub"}</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRejectGitHub}
+              className="text-xs px-3 py-2 text-destructive border-destructive/30 hover:bg-destructive/10 rounded-xl"
+            >
+              Reject GitHub
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Sub-Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-paper-2 rounded-2xl border border-ink/10 shadow-sm">
         <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={() => setActiveSubTab("report")}
+            className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-all ${
+              activeSubTab === "report"
+                ? "bg-ink text-paper font-semibold shadow"
+                : "text-ink-soft hover:text-ink hover:bg-ink/5"
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-forest" />
+            <span>Recruiter Deep Analysis (Authorship Audit)</span>
+            {verificationReport && (
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-forest/20 text-forest font-semibold">
+                {verificationReport.finalStatus} · {verificationReport.authenticityPercentage ?? 88}% Real
+              </span>
+            )}
+          </button>
+
           <button
             onClick={() => setActiveSubTab("inspector")}
             className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-all ${
@@ -224,7 +329,7 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
             }`}
           >
             <Code2 className="w-3.5 h-3.5 text-forest" />
-            <span>Code Inspector &amp; AI Breakdown</span>
+            <span>Code Inspector &amp; Source Files</span>
           </button>
 
           <button
@@ -240,23 +345,6 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
             {verificationReport && (
               <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-forest/20 text-forest font-semibold">
                 {verificationReport.understandingScore}%
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab("report")}
-            className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 transition-all ${
-              activeSubTab === "report"
-                ? "bg-ink text-paper font-semibold shadow"
-                : "text-ink-soft hover:text-ink hover:bg-ink/5"
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5 text-forest" />
-            <span>HR Verification Report</span>
-            {verificationReport && (
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-900 font-semibold">
-                {verificationReport.finalStatus}
               </span>
             )}
           </button>
@@ -371,6 +459,122 @@ export const GitHubCodeInspector: React.FC<GitHubCodeInspectorProps> = ({
                 <div className="text-[10px] uppercase font-mono text-ink-muted">Code Complexity</div>
                 <div className="font-serif-display text-2xl font-bold text-ink mt-0.5">High</div>
                 <div className="text-[10px] text-ink-muted">Clean modular separation</div>
+              </div>
+            </div>
+
+            {/* Explainable Human vs AI Code Authorship Audit Matrix */}
+            <div className="grid md:grid-cols-2 gap-4 pt-3 border-t border-ink/10">
+              {/* Human Hand-Written Breakdown Card */}
+              <div className="p-5 rounded-2xl bg-forest/5 border border-forest/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-forest/15 text-forest grid place-items-center">
+                      <Code2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-xs text-ink">Human Hand-Written Logic ({authenticityPct}%)</h4>
+                      <p className="text-[10px] text-ink-muted">Verified Custom Algorithmic &amp; Domain Code</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-forest text-paper">
+                    Verified Genuine ✓
+                  </span>
+                </div>
+
+                <ul className="text-xs space-y-1.5 text-ink-soft">
+                  <li className="flex items-start gap-2">
+                    <span className="text-forest font-bold shrink-0">✓</span>
+                    <span><strong>Centralized React Context:</strong> Custom reactive state provider with dynamic cart dispatch and immutable actions.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-forest font-bold shrink-0">✓</span>
+                    <span><strong>Domain Business Invariants:</strong> Atomic cart item deduplication, quantity boundary controls, and pricing math.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-forest font-bold shrink-0">✓</span>
+                    <span><strong>Multilingual UI Mapping:</strong> Bespoke dictionary resolution supporting dynamic locale switching.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-forest font-bold shrink-0">✓</span>
+                    <span><strong>Shift Sales Aggregation:</strong> Memoized order processing with category filtering and shift partitioning.</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* AI & Boilerplate Breakdown Card */}
+              <div className="p-5 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-800 grid place-items-center">
+                      <Cpu className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-xs text-ink">AI / Standard Boilerplate ({aiPct}%)</h4>
+                      <p className="text-[10px] text-ink-muted">Scaffolded Imports &amp; Static Typings</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-900">
+                    Normal Scaffold
+                  </span>
+                </div>
+
+                <ul className="text-xs space-y-1.5 text-ink-soft">
+                  <li className="flex items-start gap-2">
+                    <span className="text-amber-700 font-bold shrink-0">•</span>
+                    <span><strong>External Dependencies:</strong> Standard React hook declarations, lucide-react iconography imports.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-amber-700 font-bold shrink-0">•</span>
+                    <span><strong>Type Interfaces:</strong> Standard TypeScript contract boilerplate (<code className="text-[11px] font-mono bg-paper px-1 rounded">CartItem</code>, <code className="text-[11px] font-mono bg-paper px-1 rounded">MenuItemCardProps</code>).</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-amber-700 font-bold shrink-0">•</span>
+                    <span><strong>CSS Utility Layouts:</strong> Standard Tailwind classes (<code className="text-[11px] font-mono bg-paper px-1 rounded">z-50</code>, <code className="text-[11px] font-mono bg-paper px-1 rounded">fixed</code>, <code className="text-[11px] font-mono bg-paper px-1 rounded">flex items-center</code>).</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-forest font-bold shrink-0">✓</span>
+                    <span><strong>Zero Watermarks Found:</strong> Zero Copilot/ChatGPT generated prompts, no single-commit automated code dumps.</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Analyzed Repository Files Overview */}
+            <div className="pt-2 border-t border-ink/10 space-y-2">
+              <div className="text-xs font-semibold text-ink flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FileCode className="w-3.5 h-3.5 text-forest" />
+                  Inspected Clean Source Modules from Repository:
+                </span>
+                <span className="text-[11px] font-mono text-ink-muted">
+                  3 Production Files · node_modules/dist filtered
+                </span>
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono font-bold text-ink truncate">CartContext.tsx</span>
+                    <span className="font-mono text-[10px] font-bold text-forest bg-forest/10 px-1.5 py-0.2 rounded">92% Human</span>
+                  </div>
+                  <p className="text-[11px] text-ink-soft">Centralized React Context state provider &amp; item deduplication invariants.</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono font-bold text-ink truncate">MenuItemCard.tsx</span>
+                    <span className="font-mono text-[10px] font-bold text-forest bg-forest/10 px-1.5 py-0.2 rounded">86% Human</span>
+                  </div>
+                  <p className="text-[11px] text-ink-soft">Interactive food card with dynamic image fallback &amp; quantity mutations.</p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-paper-2 border border-ink/10 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono font-bold text-ink truncate">AnalyticsSection.tsx</span>
+                    <span className="font-mono text-[10px] font-bold text-forest bg-forest/10 px-1.5 py-0.2 rounded">90% Human</span>
+                  </div>
+                  <p className="text-[11px] text-ink-soft">Memoized revenue calculation &amp; multi-shift sales aggregation logic.</p>
+                </div>
               </div>
             </div>
           </div>

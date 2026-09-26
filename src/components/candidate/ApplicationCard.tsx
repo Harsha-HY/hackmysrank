@@ -30,10 +30,7 @@ interface Props {
 
 export default function ApplicationCard({ app, onOpen }: Props) {
   const rawStages = app.jobs?.pipeline_stages;
-  const pipeline: PipelineStage[] = Array.isArray(rawStages) && rawStages.length > 0
-    ? enabledStages(normalizePipeline(rawStages))
-    : [];
-
+  const pipeline: PipelineStage[] = enabledStages(normalizePipeline(rawStages));
 
   const stageKey = normalizeStageKey(app.current_stage);
   const idx = pipeline.findIndex((s) => s.key === stageKey);

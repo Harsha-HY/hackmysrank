@@ -48,6 +48,7 @@ interface Application {
   deleted_at?: string | null;
   updated_at?: string | null;
   technical_rounds?: string[] | null;
+  before_interview_passed?: boolean;
 }
 
 // Rejected / removed candidates disappear from every HR view 24h after the action.
@@ -404,14 +405,34 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
     }
     const hiredIds = new Set(acceptedNotHired.map((o) => o.application_id));
 
-    const enriched = apps.map((a) => ({
-      ...a,
-      ...(hiredIds.has(a.id) ? { current_stage: "hired", status: "hired" } : {}),
-      candidate_name: candidateMap[a.candidate_id]?.name || "Unknown",
-      candidate_email: candidateMap[a.candidate_id]?.email || "",
-      job_title: jobMap[a.job_id] || "Unknown Job",
-      pipeline_stages: jobPipelineMap[a.job_id],
-    }));
+    const workflowApps = getWorkflowApplications();
+    const wfMap = new Map<string, any>();
+    workflowApps.forEach((w) => {
+      if (w.id) wfMap.set(w.id, w);
+      if (w.candidateEmail) wfMap.set(w.candidateEmail.toLowerCase(), w);
+      if (w.candidateName) wfMap.set(w.candidateName.toLowerCase(), w);
+    });
+
+    const isAppPassedBeforeInterview = (a: any, cEmail?: string, cName?: string) => {
+      if (a.before_interview_passed || a.ai_analysis?.before_interview_passed) return true;
+      const wf = wfMap.get(a.id) || (cEmail ? wfMap.get(cEmail.toLowerCase()) : null) || (cName ? wfMap.get(cName.toLowerCase()) : null);
+      return wf?.before_interview_passed === true || wf?.overallStatus === "Interview Ready" || wf?.status === "passed";
+    };
+
+    const enriched = apps.map((a) => {
+      const cName = candidateMap[a.candidate_id]?.name || "Unknown";
+      const cEmail = candidateMap[a.candidate_id]?.email || "";
+      const passedBI = isAppPassedBeforeInterview(a, cEmail, cName);
+      return {
+        ...a,
+        ...(hiredIds.has(a.id) ? { current_stage: "hired", status: "hired" } : {}),
+        candidate_name: cName,
+        candidate_email: cEmail,
+        job_title: jobMap[a.job_id] || "Unknown Job",
+        pipeline_stages: jobPipelineMap[a.job_id],
+        before_interview_passed: passedBI,
+      };
+    });
 
     setApplications(enriched as any);
     setLoading(false);
@@ -1427,10 +1448,22 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
 
   const scoped = jobFilter === "all" ? liveApplications : liveApplications.filter((a) => a.job_id === jobFilter);
 
-  // Highest resume score first — ranking-based ordering across the board.
-  const byResumeScore = (x: Application, y: Application) => (y.resume_score ?? -1) - (x.resume_score ?? -1);
+  // Ranking: candidates who passed Before Interview are ranked HIGHER at the top,
+  // followed by highest resume score.
+  const isBeforeInterviewPassed = (a: any) => Boolean(
+    a?.before_interview_passed ||
+    a?.ai_analysis?.before_interview_passed ||
+    a?.ai_analysis?.status === "passed"
+  );
+
+  const byRankAndResumeScore = (x: Application, y: Application) => {
+    const xPassed = isBeforeInterviewPassed(x) ? 1 : 0;
+    const yPassed = isBeforeInterviewPassed(y) ? 1 : 0;
+    if (yPassed !== xPassed) return yPassed - xPassed;
+    return (y.resume_score ?? -1) - (x.resume_score ?? -1);
+  };
   const isRejected = (a: any) => a.status === "rejected" || a.current_stage === "rejected";
-  const notDeleted = scoped.filter((a) => !isDeleted(a)).slice().sort(byResumeScore);
+  const notDeleted = scoped.filter((a) => !isDeleted(a)).slice().sort(byRankAndResumeScore);
   const activeApplications = notDeleted.filter((a) => !isRejected(a));
   const deletedApplications = scoped.filter((a) => isDeleted(a));
   const rejectedApplications = scoped.filter((a) => isRejected(a) && !isDeleted(a));
@@ -1451,8 +1484,13 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
     return Math.round((matched / total) * 100);
   };
   const topCandidates = notDeleted
-    .filter((a) => a.status !== "rejected" && skillMatchPct(a) >= 100)
-    .sort((x, y) => skillMatchPct(y) - skillMatchPct(x) || ((y as any).overall_score || 0) - ((x as any).overall_score || 0));
+    .filter((a) => a.status !== "rejected" && (isBeforeInterviewPassed(a) || skillMatchPct(a) >= 100))
+    .sort((x, y) => {
+      const xPassed = isBeforeInterviewPassed(x) ? 1 : 0;
+      const yPassed = isBeforeInterviewPassed(y) ? 1 : 0;
+      if (yPassed !== xPassed) return yPassed - xPassed;
+      return skillMatchPct(y) - skillMatchPct(x) || ((y as any).overall_score || 0) - ((x as any).overall_score || 0);
+    });
 
   const tabSource =
     activeTab === "all" ? notDeleted :
@@ -1773,7 +1811,7 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
                             />
                           )}
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 onClick={() => handleViewCandidateDetails(app)}
                                 className="font-medium text-foreground hover:text-primary hover:underline cursor-pointer text-left"
@@ -1787,6 +1825,11 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
                               >
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
+                              {isBeforeInterviewPassed(app) && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                                  <CheckCircle2 className="h-3 w-3" /> Passed in Before Interview
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-muted-foreground">{app.candidate_email}</p>
                           </div>
@@ -3349,7 +3392,7 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
                         ))}
                       </div>
                     )}
-                    {/* Candidate Submitted Links & Before Interview Signals */}
+                    {/* Candidate Submitted Links & Before Interview Passed Status (No internal scores displayed) */}
                     {(() => {
                       const workflowApps = getWorkflowApplications();
                       const wf = workflowApps.find(
@@ -3359,76 +3402,63 @@ const HRCandidatesView = ({ companyId, initialJobId }: Props) => {
                       );
                       const ghTag = tags.find((t) => t.k.toLowerCase() === "github")?.v || wf?.githubAccountUrl || detailsProfile?.github_url;
                       const projTag = tags.find((t) => t.k.toLowerCase() === "project")?.v || wf?.projectLiveUrl || detailsProfile?.portfolio_url;
-                      const authPct = wf?.authenticityPercentage ?? (ghTag ? 85 : null);
-                      const aiPct = wf?.aiWrittenPercentage ?? (ghTag ? 15 : null);
+                      const passedBI = isBeforeInterviewPassed(detailsDialog) || wf?.overallStatus === "Interview Ready" || wf?.status === "passed" || Boolean(wf?.before_interview_passed);
 
-                      if (!ghTag && !projTag && !wf) return null;
+                      if (!ghTag && !projTag && !passedBI) return null;
 
                       return (
-                        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
-                              <ScanSearch className="h-4 w-4" /> ⚡ Before Interview AI Screening &amp; Links
-                            </span>
-                            {wf && (
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-primary/20 text-primary font-bold">
-                                {wf.overallStatus}
+                        <div className="space-y-3 pt-1">
+                          {passedBI && (
+                            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 flex items-center justify-between shadow-sm">
+                              <div className="flex items-center gap-2.5">
+                                <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                <div>
+                                  <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Passed in Before Interview</p>
+                                  <p className="text-xs text-muted-foreground">Screening verified and cleared by HR. Candidate is ready for interview rounds / shortlist.</p>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
+                                Screening Passed ✓
                               </span>
-                            )}
-                          </div>
-
-                          {/* GitHub & Project clickable links */}
-                          <div className="grid sm:grid-cols-2 gap-2 text-xs">
-                            {ghTag && (
-                              <a
-                                href={toHref(ghTag)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-3 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
-                              >
-                                <span className="flex items-center gap-2 truncate font-medium text-foreground">
-                                  <GitBranch className="h-4 w-4 text-primary shrink-0" />
-                                  <span className="truncate">{ghTag}</span>
-                                </span>
-                                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              </a>
-                            )}
-                            {projTag && (
-                              <a
-                                href={toHref(projTag.split(" ")[0])}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-3 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
-                              >
-                                <span className="flex items-center gap-2 truncate font-medium text-foreground">
-                                  <Layers className="h-4 w-4 text-primary shrink-0" />
-                                  <span className="truncate">{projTag}</span>
-                                </span>
-                                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              </a>
-                            )}
-                          </div>
-
-                          {/* Code Authenticity Meter */}
-                          {authPct !== null && aiPct !== null && (
-                            <div className="p-3 rounded-lg bg-card/80 border border-border space-y-1.5">
-                              <div className="flex justify-between text-xs font-mono">
-                                <span className="text-emerald-500 font-bold">{authPct}% Verified Human Code</span>
-                                <span className="text-amber-500 font-semibold">{aiPct}% AI Boilerplate</span>
-                              </div>
-                              <div className="w-full h-2 rounded-full bg-amber-500/20 overflow-hidden flex">
-                                <div className="bg-emerald-500 h-full transition-all" style={{ width: `${authPct}%` }} />
-                                <div className="bg-amber-500 h-full transition-all" style={{ width: `${aiPct}%` }} />
-                              </div>
                             </div>
                           )}
 
-                          {wf?.repoCodingChallenges && wf.repoCodingChallenges.length > 0 && (
-                            <div className="text-xs space-y-1 text-muted-foreground pt-1 border-t border-border">
-                              <span className="font-semibold text-foreground">Repo-Derived Coding Challenges: </span>
-                              <span>
-                                {wf.repoCodingChallenges.filter((c) => c.submittedCode).length}/2 Completed · AI Diagnosed Optimal Bound
-                              </span>
+                          {/* Candidate Submitted Profiles & Repositories */}
+                          {(ghTag || projTag) && (
+                            <div className="space-y-2">
+                              <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                                🔗 Candidate Submitted Links
+                              </p>
+                              <div className="grid sm:grid-cols-2 gap-2 text-xs">
+                                {ghTag && (
+                                  <a
+                                    href={toHref(ghTag)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-2.5 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
+                                  >
+                                    <span className="flex items-center gap-2 truncate font-medium text-foreground">
+                                      <GitBranch className="h-4 w-4 text-primary shrink-0" />
+                                      <span className="truncate">{ghTag}</span>
+                                    </span>
+                                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  </a>
+                                )}
+                                {projTag && (
+                                  <a
+                                    href={toHref(projTag.split(" ")[0])}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-2.5 rounded-lg border border-border bg-card hover:border-primary/50 transition-colors flex items-center justify-between gap-2"
+                                  >
+                                    <span className="flex items-center gap-2 truncate font-medium text-foreground">
+                                      <Layers className="h-4 w-4 text-primary shrink-0" />
+                                      <span className="truncate">{projTag}</span>
+                                    </span>
+                                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  </a>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>

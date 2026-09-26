@@ -29,6 +29,7 @@
  */
 
 import { InspectedCodeFile } from "./geminiResumeAnalyzer";
+import { fetchRealGitHubAnalysis } from "./githubRealFetcher";
 
 export type CodeAuthorshipClassification =
   | "HAND-WRITTEN"
@@ -479,6 +480,88 @@ export async function performGitHubCodeVerification(
   existingInspectedFiles?: InspectedCodeFile[],
   candidateAnswers?: { [questionId: number]: number }
 ): Promise<GitHubVerificationReport> {
+  const targetUrl = repoUrl && repoUrl.includes("github.com") ? repoUrl : "https://github.com/Harsha-HY/nalapaka";
+
+  // 1. Query real Node.js backend first if in browser environment
+  try {
+    if (typeof window !== "undefined") {
+      const endpoint = `/api/github-inspect?repo=${encodeURIComponent(targetUrl)}&candidate=${encodeURIComponent(candidateInfo?.name || "Candidate")}`;
+      const res = await fetch(endpoint);
+      if (res.ok) {
+        const payload = await res.json();
+        if (payload?.report) {
+          let rep = payload.report as GitHubVerificationReport;
+          if (candidateAnswers && Object.keys(candidateAnswers).length > 0) {
+            let answeredCount = 0;
+            let correctCount = 0;
+            const updatedQs = rep.understandingAssessment.questions.map((q) => {
+              if (candidateAnswers[q.id] !== undefined) {
+                answeredCount++;
+                const userAns = candidateAnswers[q.id];
+                const isCorrect = userAns === q.correctIndex;
+                if (isCorrect) correctCount++;
+                return { ...q, userAnswer: userAns, isCorrect };
+              }
+              return q;
+            });
+            const score = answeredCount > 0 ? Math.round((correctCount / updatedQs.length) * 100) : rep.understandingScore;
+            rep = {
+              ...rep,
+              understandingScore: score,
+              understandingAssessment: {
+                ...rep.understandingAssessment,
+                answeredCount,
+                correctCount,
+                score,
+                questions: updatedQs,
+              },
+            };
+          }
+          return rep;
+        }
+      }
+    }
+  } catch (backendErr) {
+    console.warn("Node /api/github-inspect endpoint fallback:", backendErr);
+  }
+
+  // 2. Direct real analysis fallback (fetches real repository files, commits & questions)
+  try {
+    const realResult = await fetchRealGitHubAnalysis(targetUrl, candidateInfo?.name || "Candidate");
+    if (realResult?.report) {
+      let rep = realResult.report;
+      if (candidateAnswers && Object.keys(candidateAnswers).length > 0) {
+        let answeredCount = 0;
+        let correctCount = 0;
+        const updatedQs = rep.understandingAssessment.questions.map((q) => {
+          if (candidateAnswers[q.id] !== undefined) {
+            answeredCount++;
+            const userAns = candidateAnswers[q.id];
+            const isCorrect = userAns === q.correctIndex;
+            if (isCorrect) correctCount++;
+            return { ...q, userAnswer: userAns, isCorrect };
+          }
+          return q;
+        });
+        const score = answeredCount > 0 ? Math.round((correctCount / updatedQs.length) * 100) : rep.understandingScore;
+        rep = {
+          ...rep,
+          understandingScore: score,
+          understandingAssessment: {
+            ...rep.understandingAssessment,
+            answeredCount,
+            correctCount,
+            score,
+            questions: updatedQs,
+          },
+        };
+      }
+      return rep;
+    }
+  } catch (fetchErr) {
+    console.warn("fetchRealGitHubAnalysis error:", fetchErr);
+  }
+
   const parsed = parseGitHubUrl(repoUrl);
   const owner = parsed?.owner || "candidate-developer";
   const repoName = parsed?.repo || "repository";

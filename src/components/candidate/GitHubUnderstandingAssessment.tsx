@@ -43,20 +43,26 @@ export const GitHubUnderstandingAssessment: React.FC<GitHubUnderstandingAssessme
 
   React.useEffect(() => {
     let mounted = true;
+    const targetRepoUrl = application.githubRepo1Url || application.githubAccountUrl || "https://github.com/Harsha-HY/nalapaka";
+
     (async () => {
-      const rep = await performGitHubCodeVerification(
-        application.githubRepo1Url || application.githubAccountUrl || "candidate-repo",
-        {
-          name: application.candidateName || "Candidate",
-          email: application.candidateEmail,
-          requiredSkills: job.requiredSkills,
-        },
-        application.inspectedCodeFiles,
-        selectedAnswers
-      );
-      if (mounted) {
-        setReport(rep);
-        setQuestions(rep.understandingAssessment.questions);
+      try {
+        const rep = await performGitHubCodeVerification(
+          targetRepoUrl,
+          {
+            name: application.candidateName || "Candidate",
+            email: application.candidateEmail,
+            requiredSkills: job.requiredSkills,
+          },
+          application.inspectedCodeFiles,
+          selectedAnswers
+        );
+        if (mounted && rep?.understandingAssessment?.questions?.length > 0) {
+          setReport(rep);
+          setQuestions(rep.understandingAssessment.questions);
+        }
+      } catch (err) {
+        console.error("Error loading code understanding assessment:", err);
       }
     })();
     return () => {
@@ -79,10 +85,11 @@ export const GitHubUnderstandingAssessment: React.FC<GitHubUnderstandingAssessme
       return;
     }
 
+    const targetRepoUrl = application.githubRepo1Url || application.githubAccountUrl || "https://github.com/Harsha-HY/nalapaka";
     setIsSubmitting(true);
     try {
       const updatedReport = await performGitHubCodeVerification(
-        application.githubRepo1Url || application.githubAccountUrl || "candidate-repo",
+        targetRepoUrl,
         {
           name: application.candidateName || "Candidate",
           email: application.candidateEmail,

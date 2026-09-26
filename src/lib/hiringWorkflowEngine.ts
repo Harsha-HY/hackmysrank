@@ -160,7 +160,9 @@ export interface CandidateApplicationSubmission {
 
   // Overall Status
   overallStatus: "Auto-Rejected (Resume)" | "Auto-Rejected (GitHub)" | "Auto-Rejected (Project)" | "Before Interview (Passed Cutoffs)" | "In Technical Assessment" | "Interview Ready";
-  currentStage: "before_interview" | "mcq_assessment" | "dsa_sandbox" | "ai_interview" | "rejected";
+  currentStage: "before_interview" | "mcq_assessment" | "dsa_sandbox" | "ai_interview" | "shortlisted" | "aptitude_test" | "rejected";
+  status?: "passed" | "rejected" | "pending" | "shortlisted" | string;
+  before_interview_passed?: boolean;
 }
 
 export const DEFAULT_JOBS: JobCutoffs[] = [

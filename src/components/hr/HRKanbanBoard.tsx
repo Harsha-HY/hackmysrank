@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Eye, MessageCircle, ArrowRight, X, Search, Filter, User as UserIcon } from "lucide-react";
+import { Eye, MessageCircle, ArrowRight, X, Search, Filter, User as UserIcon, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,6 +22,8 @@ export interface KanbanApp {
   video_score: number | null;
   photo_url?: string | null;
   applied_at: string;
+  before_interview_passed?: boolean;
+  ai_analysis?: any;
 }
 
 interface Props {
@@ -87,11 +89,22 @@ export default function HRKanbanBoard({ apps, onMove, onView, onMessage }: Props
     });
   }, [apps, search, jobFilter, scoreRange, dateFilter]);
 
+  const isPassedBI = (a: any) => Boolean(a.before_interview_passed || a.ai_analysis?.before_interview_passed);
+
   const grouped = useMemo(() => {
     const g: Record<string, KanbanApp[]> = Object.fromEntries(COLUMNS.map((c) => [c.key, []]));
     filtered.forEach((a) => {
       const col = columnOfStage(a.current_stage);
       (g[col] ||= []).push(a);
+    });
+    // Sort each column so candidates who passed Before Interview are ranked HIGHEST at the top
+    Object.keys(g).forEach((k) => {
+      g[k].sort((x, y) => {
+        const xP = isPassedBI(x) ? 1 : 0;
+        const yP = isPassedBI(y) ? 1 : 0;
+        if (yP !== xP) return yP - xP;
+        return (y.resume_score ?? -1) - (x.resume_score ?? -1);
+      });
     });
     return g;
   }, [filtered]);
@@ -208,7 +221,12 @@ export default function HRKanbanBoard({ apps, onMove, onView, onMessage }: Props
                           </div>
                         </div>
 
-                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                          {isPassedBI(app) && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Passed in Before Interview
+                            </span>
+                          )}
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${scoreColor(app.resume_score)}`}>
                             AI {app.resume_score ?? "—"}
                           </span>
@@ -283,6 +301,15 @@ export default function HRKanbanBoard({ apps, onMove, onView, onMessage }: Props
                     <p className="text-xs text-muted-foreground truncate">{panelApp.job_title}</p>
                   </div>
                 </div>
+
+                {isPassedBI(panelApp) && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" /> Passed in Before Interview
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 font-bold">Screening Cleared</span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   {[

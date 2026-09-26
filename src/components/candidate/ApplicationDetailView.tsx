@@ -1,11 +1,11 @@
-import { CheckCircle2, Clock, Lock, ExternalLink, ArrowLeft, Building2, MapPin, Briefcase, Calendar, FileText, XCircle, Trophy, Upload } from "lucide-react";
+import { CheckCircle2, Clock, Lock, ExternalLink, ArrowLeft, Building2, MapPin, Briefcase, Calendar, FileText, XCircle, Trophy, Upload, Sparkles, Code2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useToast } from "@/hooks/use-toast";
-import { normalizePipeline, enabledStages, type PipelineStage } from "@/lib/pipeline";
+import { normalizePipeline, enabledStages, defaultPipeline, type PipelineStage } from "@/lib/pipeline";
 
 // How the hiring team wants a PDF-based round answered
 const FORMAT_LABEL: Record<string, string> = {
@@ -17,25 +17,26 @@ const FORMAT_LABEL: Record<string, string> = {
 };
 
 const STAGE_DESC: Record<string, string> = {
+  before_interview: "AI ATS resume review & authentic GitHub code inspection",
   resume: "AI scoring your resume against job skills",
-  aptitude: "Online proctored aptitude assessment",
+  aptitude: "5 Personalized MCQs on repository stack & architecture",
   video_intro: "3-4 min recorded introduction",
-  technical: "DSA / Coding / MCQ evaluation",
+  technical: "2 Live practical coding challenges derived from repository",
   gd: "Live group discussion with other candidates",
-  hr_interview: "Final HR conversation",
+  hr_interview: "Final HR culture & technical discussion",
   managerial: "Round with the hiring manager",
-  offer: "Offer issued / onboarding",
+  offer: "Offer issued / onboarding documents",
 };
 
 // Map arbitrary application.current_stage strings to a pipeline stage key
 const normalize = (raw: string): string => {
-  if (!raw) return "resume";
+  if (!raw) return "before_interview";
   const r = String(raw).toLowerCase();
   if (r.startsWith("round:")) return r.slice(6);
-  if (["applied", "ai_scored", "shortlisted", "resume_review", "resume_completed", "screening"].includes(r)) return "resume";
-  if (r.startsWith("test") || r.startsWith("aptitude")) return "aptitude";
+  if (["before_interview", "before-interview", "beforeinterview", "applied", "ai_scored", "shortlisted", "resume_review", "resume_completed", "screening", "resume"].includes(r)) return "before_interview";
+  if (r.startsWith("test") || r.startsWith("aptitude") || r.includes("mcq")) return "aptitude";
   if (r.startsWith("video")) return "video_intro";
-  if (r.startsWith("technical")) return "technical";
+  if (r.startsWith("technical") || r.startsWith("coding") || r.includes("dsa")) return "technical";
   if (r.startsWith("gd") || r.startsWith("group_discussion")) return "gd";
   if (r.startsWith("interview") || r.startsWith("hr_")) return "hr_interview";
   if (r.startsWith("manager")) return "managerial";
@@ -121,23 +122,19 @@ export default function ApplicationDetailView({ app, gdInfo, submittedTest, onBa
   const job = app.jobs || {};
   const company = job.companies || {};
 
-  // Rounds come from the interview-process template HR picked for THIS job.
-  // No hardcoded fallback — if HR hasn't published a process we show nothing.
+  // Rounds come from the interview-process template HR picked for THIS job, or standard default pipeline
   const rawStages = job.pipeline_stages;
-  const STAGES: PipelineStage[] = Array.isArray(rawStages) && rawStages.length > 0
-    ? enabledStages(normalizePipeline(rawStages))
-    : [];
-
+  const STAGES: PipelineStage[] = enabledStages(normalizePipeline(rawStages));
 
   // A round counts as finished when the candidate actually produced a result
   // for it, regardless of what current_stage string the backend last wrote.
   const stageDone = (s: PipelineStage): boolean => {
     switch (s.type) {
-      case "screening": return app.resume_score != null;
-      case "test": return app.test_score != null;
+      case "screening": return app.resume_score != null || app.authenticityPercentage != null || app.githubScore != null || (raw !== "before_interview" && raw !== "applied");
+      case "test": return app.test_score != null || app.mcqScore != null || ["technical", "technical_round", "hr_interview", "offer", "hired"].includes(raw);
       case "video": return app.video_score != null || !!app.video_url;
-      case "technical": return app.technical_score != null;
-      case "interview": return app.interview_score != null;
+      case "technical": return app.technical_score != null || app.codingScore != null || ["hr_interview", "offer", "hired"].includes(raw);
+      case "interview": return app.interview_score != null || ["offer", "hired"].includes(raw);
       default: return false;
     }
   };
@@ -223,6 +220,26 @@ export default function ApplicationDetailView({ app, gdInfo, submittedTest, onBa
         })()}
       </div>
 
+      {/* Passed in Before Interview banner */}
+      {(app.before_interview_passed || app.ai_analysis?.before_interview_passed) && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <div>
+              <h4 className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                Passed in Before Interview
+              </h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Your application has passed the preliminary Before-Interview screening and is approved by HR for upcoming hiring rounds!
+              </p>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
+            Screening Cleared ✓
+          </span>
+        </div>
+      )}
+
       {/* Rejection / Hired banner */}
       {rejected && (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-5">
@@ -300,26 +317,46 @@ export default function ApplicationDetailView({ app, gdInfo, submittedTest, onBa
                       {STAGE_DESC[s.key] || s.config?.instructions || "Round in this hiring process"}
                     </p>
 
-                    {(s.key === "before_interview" || raw === "before_interview" || (current && s.key === "resume")) && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "before-interview" }));
-                          navigate("/candidate-dashboard?tab=before-interview");
-                        }}
-                        className="mt-3 h-8 px-3 text-xs bg-primary text-primary-foreground gap-1.5"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" /> Open Before Interview
+                    {s.key === "before_interview" && (
+                      completed ? (
+                        <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/25 px-3 py-2 rounded-xl">
+                          <CheckCircle2 className="h-4 w-4 shrink-0" />
+                          <span>Passed in Before Interview — Screening approved by HR! Ready for interview rounds.</span>
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                            <Clock className="h-3.5 w-3.5 shrink-0" />
+                            <span>Stage 1 in progress: Complete Resume, GitHub, 5 MCQs &amp; 2 Coding Questions in the Before Interview Panel.</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent("hz_switch_candidate_tab", { detail: "before-interview" }));
+                              navigate("/candidate-dashboard?tab=before-interview");
+                            }}
+                            className="h-8 px-3 text-xs bg-primary text-primary-foreground gap-1.5"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" /> Open Before Interview Panel →
+                          </Button>
+                        </div>
+                      )
+                    )}
+
+                    {current && s.key === "aptitude" && !submittedTest && (
+                      <Button size="sm" onClick={() => navigate("/aptitude-test")} className="mt-3 h-8 px-3 text-xs">
+                        🎯 Take Aptitude Test
                       </Button>
                     )}
-                    {current && s.key === "aptitude" && !submittedTest && (
-                      <Button size="sm" onClick={() => navigate("/aptitude-test")} className="mt-3 h-8 px-3 text-xs">🎯 Take Aptitude Test</Button>
-                    )}
                     {current && s.key === "video_intro" && (
-                      <Button size="sm" onClick={() => navigate("/video-intro")} className="mt-3 h-8 px-3 text-xs">🎥 Record Video</Button>
+                      <Button size="sm" onClick={() => navigate("/video-intro")} className="mt-3 h-8 px-3 text-xs">
+                        🎥 Record Video
+                      </Button>
                     )}
-                    {current && s.key === "technical" && raw === "technical_test" && (
-                      <Button size="sm" onClick={() => navigate("/technical-test")} className="mt-3 h-8 px-3 text-xs">💻 Take Technical Test</Button>
+                    {current && s.key === "technical" && (
+                      <Button size="sm" onClick={() => navigate("/technical-test")} className="mt-3 h-8 px-3 text-xs">
+                        💻 Take Technical Test
+                      </Button>
                     )}
                     {current && s.key === "gd" && gdInfo?.id && (
                       <div className="mt-3 text-xs">

@@ -26,6 +26,8 @@ import BeforeInterviewCandidatePanel from "@/components/candidate/BeforeIntervie
 import ThemeToggle from "@/components/ThemeToggle";
 import BrandLogo from "@/components/BrandLogo";
 import { Loader2 } from "@/components/BrandLoader";
+import { getWorkflowApplications } from "@/lib/hiringWorkflowEngine";
+import { defaultPipeline } from "@/lib/pipeline";
 
 const stages = [
   { key: "applied", label: "Applied", icon: "✅" },
@@ -46,7 +48,26 @@ interface Application {
   job_id: string;
   resume_url?: string | null;
   test_score?: number | null;
-  jobs?: { title: string; company_id: string; companies?: { company_name: string } | null } | null;
+  resume_score?: number | null;
+  technical_score?: number | null;
+  overall_score?: number | null;
+  authenticityPercentage?: number | null;
+  githubScore?: number | null;
+  mcqScore?: number | null;
+  codingScore?: number | null;
+  rejection_reason?: string | null;
+  rejection_stage?: string | null;
+  before_interview_passed?: boolean;
+  ai_analysis?: any;
+  jobs?: {
+    title: string;
+    company_id: string;
+    employment_type?: string | null;
+    work_type?: string | null;
+    location?: string | null;
+    pipeline_stages?: any;
+    companies?: { company_name: string } | null;
+  } | null;
 }
 
 const CandidateDashboard = () => {
@@ -84,13 +105,60 @@ const CandidateDashboard = () => {
   const [profileCompletion, setProfileCompletion] = useState<{ pct: number; missing: string[] } | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [journeyApp, setJourneyApp] = useState<Application | null>(null);
+  const [isJourneyDrawerOpen, setIsJourneyDrawerOpen] = useState(false);
 
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const getMappedWorkflowApps = (): Application[] => {
+    try {
+      const workflowApps = getWorkflowApplications();
+      return workflowApps.map((wApp) => {
+        const isPassed = wApp.status === "passed" || wApp.overallStatus === "Interview Ready" || Boolean((wApp as any).before_interview_passed);
+        return {
+          id: wApp.id,
+          current_stage: isPassed ? "shortlisted" : (wApp.currentStage || "before_interview"),
+          status: wApp.status === "rejected" ? "rejected" : (isPassed ? "shortlisted" : "applied"),
+          applied_at: wApp.appliedDate || new Date().toISOString(),
+          job_id: wApp.jobId,
+          resume_url: wApp.resumeFileName || null,
+          test_score: null, // Before interview internal MCQ is not the aptitude test score
+          technical_score: null, // Before interview sandbox is not the live technical round score
+          overall_score: null,
+          resume_score: null,
+          before_interview_passed: isPassed,
+          rejection_reason: wApp.resumeRejectionReason || wApp.githubRejectionReason || null,
+          rejection_stage: wApp.status === "rejected" ? (wApp.resumePassed ? "github" : "resume") : null,
+          jobs: {
+            title: wApp.jobTitle || "Full Stack Engineer (React + Node.js)",
+            company_id: "comp-nalapaka",
+            employment_type: "Full-time",
+            work_type: "Remote / Hybrid",
+            location: "Bengaluru, India",
+            pipeline_stages: defaultPipeline(),
+            companies: {
+              company_name: wApp.jobCompany || "Nalapaka Tech / FoodTech Innovators"
+            }
+          }
+        };
+      });
+    } catch (e) {
+      console.error("Error reading workflow applications in candidate dashboard:", e);
+      return [];
+    }
+  };
+
   const fetchData = useCallback(async () => {
+    const mappedWorkflow = getMappedWorkflowApps();
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      if (mappedWorkflow.length > 0) {
+        setApplications(mappedWorkflow);
+        setJourneyApp((prev) => prev || mappedWorkflow[0]);
+      }
+      setLoading(false);
+      return;
+    }
 
     const { data: userData } = await supabase
       .from("users")
@@ -98,7 +166,14 @@ const CandidateDashboard = () => {
       .eq("user_id", session.user.id)
       .maybeSingle();
 
-    if (!userData) return;
+    if (!userData) {
+      if (mappedWorkflow.length > 0) {
+        setApplications(mappedWorkflow);
+        setJourneyApp((prev) => prev || mappedWorkflow[0]);
+      }
+      setLoading(false);
+      return;
+    }
     setUser(userData);
     setProfileName(userData.full_name);
     setProfilePhone(userData.phone || "");
@@ -153,18 +228,29 @@ const CandidateDashboard = () => {
       .eq("candidate_id", userData.id)
       .order("applied_at", { ascending: false });
 
-    if (apps) {
-      const appRows = apps as unknown as Application[];
-      setApplications(appRows);
+    const appRows = (apps as unknown as Application[]) || [];
+    const existingIds = new Set(appRows.map((a) => a.id));
+    const combinedApps = [...appRows, ...mappedWorkflow.filter((w) => !existingIds.has(w.id))].map((a) => {
+      const isPassed = Boolean(
+        a.before_interview_passed ||
+        (a as any).ai_analysis?.before_interview_passed ||
+        mappedWorkflow.some((w) => (w.id === a.id || w.job_id === a.job_id) && (w.before_interview_passed || w.status === "passed"))
+      );
+      return {
+        ...a,
+        before_interview_passed: isPassed,
+      };
+    });
+    setApplications(combinedApps);
+    setJourneyApp((prev) => (prev ? combinedApps.find((a) => a.id === prev.id) || prev : combinedApps[0] || null));
 
+    if (appRows.length > 0) {
       const appIds = appRows.map((a) => a.id);
-      if (appIds.length > 0) {
-        const { data: answerRows } = await supabase
-          .from("test_answers")
-          .select("application_id")
-          .in("application_id", appIds);
-        setSubmittedTestAppIds(new Set((answerRows || []).map((r: any) => r.application_id)));
-      }
+      const { data: answerRows } = await supabase
+        .from("test_answers")
+        .select("application_id")
+        .in("application_id", appIds);
+      setSubmittedTestAppIds(new Set((answerRows || []).map((r: any) => r.application_id)));
     }
 
     const { data: offers } = await supabase
@@ -324,8 +410,16 @@ const CandidateDashboard = () => {
         }
       }
     };
+
+    const handleWorkflowAppsUpdated = () => {
+      fetchData();
+    };
+    window.addEventListener("hz_workflow_apps_updated", handleWorkflowAppsUpdated);
     window.addEventListener("hz_switch_candidate_tab", handleSwitchTab);
-    return () => window.removeEventListener("hz_switch_candidate_tab", handleSwitchTab);
+    return () => {
+      window.removeEventListener("hz_switch_candidate_tab", handleSwitchTab);
+      window.removeEventListener("hz_workflow_apps_updated", handleWorkflowAppsUpdated);
+    };
   }, [fetchData]);
 
   // Real-time subscription for application stage changes
@@ -577,7 +671,7 @@ const CandidateDashboard = () => {
           ) : (
             <div className="grid md:grid-cols-2 gap-4">
               {activeApps.map((a) => (
-                <ApplicationCard key={a.id} app={a as any} onOpen={() => setJourneyApp(a)} />
+                <ApplicationCard key={a.id} app={a as any} onOpen={() => { setJourneyApp(a); setIsJourneyDrawerOpen(true); }} />
               ))}
             </div>
           )}
@@ -663,7 +757,7 @@ const CandidateDashboard = () => {
   };
 
   const renderApplicationQueue = (items: any[], emptyLabel: string) => {
-    const selected = journeyApp && items.find((a: any) => a.id === journeyApp.id) ? journeyApp : null;
+    const selected = (journeyApp && items.find((a: any) => a.id === journeyApp.id)) || journeyApp || items[0] || null;
 
     return (
       <div className="space-y-5">
@@ -709,6 +803,11 @@ const CandidateDashboard = () => {
                     }`}>
                       {isRej ? "Rejected" : isHired ? "Hired" : (a.current_stage || "applied").replace(/_/g, " ")}
                     </p>
+                    {(a.before_interview_passed || a.ai_analysis?.before_interview_passed) && (
+                      <span className="inline-block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                        ✓ Passed in Before Interview
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -745,7 +844,24 @@ const CandidateDashboard = () => {
         </div>
       </div>
 
-      {activeApps.some((a: any) => a.current_stage === "before_interview" || a.current_stage === "applied") && (
+      {activeApps.some((a: any) => a.before_interview_passed || a.ai_analysis?.before_interview_passed) && (
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div>
+            <h5 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              🎉 Passed in Before Interview
+            </h5>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Your Before Interview screening has been verified and cleared by HR. You are shortlisted and ready for upcoming hiring rounds!
+            </p>
+          </div>
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 self-start sm:self-auto">
+            Screening Cleared ✓
+          </span>
+        </div>
+      )}
+
+      {activeApps.some((a: any) => (a.current_stage === "before_interview" || a.current_stage === "applied") && !a.before_interview_passed && !a.ai_analysis?.before_interview_passed) && (
         <div className="p-4 rounded-2xl bg-primary/10 border border-primary/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
           <div>
             <h5 className="text-sm font-bold text-foreground flex items-center gap-1.5">
@@ -1091,7 +1207,7 @@ const CandidateDashboard = () => {
       case "before-interview":
       case "before_interview":
       case "beforeinterview":
-        return <BeforeInterviewCandidatePanel />;
+        return <BeforeInterviewCandidatePanel candidateUser={user} />;
       case "interviews":
         return renderInterviewsTab();
       case "browse":
@@ -1205,8 +1321,8 @@ const CandidateDashboard = () => {
 
       {/* Journey Drawer */}
       <JourneyDrawer
-        open={!!journeyApp && activeTab !== "applications" && activeTab !== "history"}
-        onClose={() => setJourneyApp(null)}
+        open={isJourneyDrawerOpen && !!journeyApp && activeTab !== "applications" && activeTab !== "history"}
+        onClose={() => setIsJourneyDrawerOpen(false)}
         app={journeyApp as any}
         gdInfo={gdInfo}
         submittedTest={journeyApp ? submittedTestAppIds.has(journeyApp.id) : false}

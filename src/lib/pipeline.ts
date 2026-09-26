@@ -33,14 +33,15 @@ export interface PipelineStage {
 
 // Built-in stage catalog — the fixed keys the rest of the codebase understands.
 export const BUILTIN_STAGES: PipelineStage[] = [
-  { key: "resume",       label: "Resume Review",    type: "screening", enabled: true, order: 0, builtin: true },
-  { key: "aptitude",     label: "Aptitude Test",    type: "test",      enabled: true, order: 1, builtin: true, config: { cutoff: 60 } },
-  { key: "video_intro",  label: "Video Intro",      type: "video",     enabled: true, order: 2, builtin: true, config: { duration: 3 } },
-  { key: "technical",    label: "Technical Round",  type: "technical", enabled: true, order: 3, builtin: true, config: { duration: 90 } },
+  { key: "before_interview", label: "Before Interview Screening", type: "screening", enabled: true, order: 0, builtin: true, config: { instructions: "Resume ATS review, GitHub code inspection, 5 repository MCQs & 2 coding challenges" } },
+  { key: "resume",       label: "Resume Review",    type: "screening", enabled: false, order: 0.5, builtin: true },
+  { key: "aptitude",     label: "Aptitude Assessment", type: "test", enabled: true, order: 1, builtin: true, config: { cutoff: 70, instructions: "Online proctored aptitude assessment" } },
+  { key: "technical",    label: "Technical Round", type: "technical", enabled: true, order: 2, builtin: true, config: { duration: 60, instructions: "Live technical interview / DSA evaluation" } },
+  { key: "video_intro",  label: "Video Intro",      type: "video",     enabled: false, order: 3, builtin: true, config: { duration: 3 } },
   { key: "gd",           label: "Group Discussion", type: "gd",        enabled: false, order: 4, builtin: true, config: { duration: 30 } },
-  { key: "hr_interview", label: "HR Interview",     type: "interview", enabled: true, order: 5, builtin: true, config: { duration: 45, mode: "video_call" } },
+  { key: "hr_interview", label: "HR Interview",     type: "interview", enabled: true, order: 5, builtin: true, config: { duration: 45, mode: "video_call", instructions: "One-on-one culture fit and final interview" } },
   { key: "managerial",   label: "Managerial Round", type: "interview", enabled: false, order: 6, builtin: true, config: { duration: 45, mode: "video_call" } },
-  { key: "offer",        label: "Offer",            type: "offer",     enabled: true, order: 7, builtin: true },
+  { key: "offer",        label: "Offer Letter",     type: "offer",     enabled: true, order: 7, builtin: true, config: { instructions: "Formal offer rollout and onboarding" } },
 ];
 
 // Preset templates seeded on first template-page load.
