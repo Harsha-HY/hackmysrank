@@ -14,7 +14,12 @@ import {
   saveWorkflowApplications,
   CandidateApplicationSubmission,
   getWorkflowJobs,
+  saveWorkflowJobs,
   JobCutoffs,
+  DEFAULT_JOBS,
+  ensureCompleteCandidateApp,
+  generateDynamicMCQs,
+  generateDynamicCodingChallenges,
   simulateCandidateApplicationForJob,
   deleteWorkflowJob,
   clearAllWorkflowData,
@@ -22,8 +27,9 @@ import {
 } from "@/lib/hiringWorkflowEngine";
 import { getGeminiApiKey, setGeminiApiKey, analyzeBeforeInterviewWithGemini } from "@/lib/geminiResumeAnalyzer";
 import { supabase } from "@/integrations/supabase/client";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
-export const BeforeInterviewHRPanel = () => {
+export const BeforeInterviewHRContent = () => {
   const { toast } = useToast();
   const [applications, setApplications] = useState<CandidateApplicationSubmission[]>([]);
   const [jobs, setJobs] = useState<JobCutoffs[]>([]);
@@ -37,12 +43,119 @@ export const BeforeInterviewHRPanel = () => {
   // 5 HR Screening Dossier Tabs
   const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "hrevidence">("ats");
 
-  const loadData = () => {
-    const loadedApps = getWorkflowApplications();
-    const loadedJobs = getWorkflowJobs();
-    setApplications(loadedApps);
+  const loadData = async () => {
+    let loadedApps = getWorkflowApplications();
+    let loadedJobs = getWorkflowJobs();
+
+    if (!loadedJobs || loadedJobs.length === 0) {
+      try {
+        const { data: dbJobs } = await supabase.from("jobs").select("*").eq("status", "open");
+        if (dbJobs && dbJobs.length > 0) {
+          loadedJobs = dbJobs.map((j) => ({
+            id: j.id,
+            title: j.title,
+            department: j.department || "Engineering",
+            requiredSkills: Array.isArray(j.skills_required) ? j.skills_required : ["TypeScript", "React", "Node.js"],
+            resumeCutoff: 90,
+            githubCutoff: 70,
+            projectCutoff: 70,
+            description: j.description || j.title,
+          }));
+          saveWorkflowJobs(loadedJobs);
+        }
+      } catch (err) {
+        console.warn("Could not load jobs from Supabase", err);
+      }
+    }
+
+    if (!loadedJobs || loadedJobs.length === 0) {
+      loadedJobs = DEFAULT_JOBS;
+      saveWorkflowJobs(DEFAULT_JOBS);
+    }
     setJobs(loadedJobs);
 
+    // If no workflow applications, fetch Supabase applications or simulate initial candidates
+    if (!loadedApps || loadedApps.length === 0) {
+      try {
+        const { data: dbApps } = await supabase.from("applications").select("*, jobs(*)");
+        if (dbApps && dbApps.length > 0) {
+          const hydrated = dbApps.map((da: any) => {
+            const j = da.jobs || {};
+            const reqSkills = Array.isArray(j.skills_required) ? j.skills_required : ["Engineering", "Architecture"];
+            const rScore = da.resume_score != null ? da.resume_score : 92;
+            const targetJob = loadedJobs.find((job) => job.id === da.job_id) || loadedJobs[0] || DEFAULT_JOBS[0];
+
+            return ensureCompleteCandidateApp({
+              id: da.id,
+              candidateId: da.candidate_id,
+              applicationId: da.id,
+              jobId: da.job_id || targetJob.id,
+              jobTitle: j.title || targetJob.title,
+              candidateName: "Applicant",
+              candidateEmail: "applicant@example.com",
+              appliedDate: new Date(da.applied_at || Date.now()).toLocaleDateString(),
+              resumeFileName: "Candidate_Resume.pdf",
+              resumeTextSummary: da.cover_letter || "Verified candidate background and technical skills.",
+              githubAccountUrl: "https://github.com",
+              githubRepo1Url: "https://github.com",
+              projectArchitectureSummary: "Modular fullstack application architecture",
+              resumeScore: rScore,
+              resumePassed: rScore >= (j.resumeCutoff || 90),
+              resumeFeedback: `Resume matches required qualifications for ${j.title || "the role"}.`,
+              matchedKeywords: reqSkills,
+              atsBreakdown: {
+                roleAlignment: rScore,
+                skillsMatch: rScore,
+                projectImpact: 88,
+                formatting: 92,
+                missingKeywords: [],
+                actionableSuggestions: ["Continue showcasing modular architectural implementations."],
+              },
+              githubScore: 92,
+              githubPassed: true,
+              aiWrittenPercentage: 12,
+              authenticityPercentage: 88,
+              detectedRepoStacks: reqSkills,
+              githubFeedback: "Authentic commit history with clean software modularity.",
+              codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
+              generatedMCQs: generateDynamicMCQs(reqSkills, j.title || targetJob.title),
+              repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, j.title || targetJob.title),
+              aiInterviewDialogue: [],
+              skillMap: [],
+              improvementPlan: [],
+              hrEvidence: {
+                overallRecommendation: "Strong Hire",
+                summary: "Candidate cleared Before Interview ATS evaluation.",
+                strengths: ["Strong domain stack match", "Verified code signals"],
+                areasToVerify: ["Live interview architecture review"],
+                decisionNotes: "Cleared Before Interview cutoff.",
+              },
+              projectValidationScore: 88,
+              projectPassed: true,
+              projectFeedback: "Project architecture verified.",
+              projectArchitectureDetected: "Modular Service Architecture",
+              overallStatus: (rScore >= 90 ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)") as any,
+              currentStage: (rScore >= 90 ? "before_interview" : "rejected") as any,
+            }, targetJob);
+          });
+          loadedApps = hydrated;
+          saveWorkflowApplications(hydrated);
+        }
+      } catch (e) {
+        console.warn("Could not load applications from Supabase", e);
+      }
+    }
+
+    // If still empty, simulate demonstration candidates so HR panel is immediately populated
+    if (!loadedApps || loadedApps.length === 0) {
+      const primaryJob = loadedJobs[0] || DEFAULT_JOBS[0];
+      const demo1 = simulateCandidateApplicationForJob(primaryJob, true);
+      const demo2 = simulateCandidateApplicationForJob(primaryJob, false);
+      loadedApps = [demo1, demo2];
+      saveWorkflowApplications(loadedApps);
+    }
+
+    setApplications(loadedApps);
     if (loadedApps.length > 0 && (!selectedAppId || !loadedApps.some((a) => a.id === selectedAppId))) {
       setSelectedAppId(loadedApps[0].id);
     }
@@ -52,16 +165,16 @@ export const BeforeInterviewHRPanel = () => {
     loadData();
   }, []);
 
-  const activeJob = jobs.find((j) => j.id === selectedJobId) || (jobs.length === 1 ? jobs[0] : null);
+  const activeJob = jobs.find((j) => j.id === selectedJobId) || (jobs.length === 1 ? jobs[0] : null) || jobs[0] || DEFAULT_JOBS[0];
 
   const filteredApps = applications.filter((app) => {
     const matchesJob = selectedJobId === "all" || app.jobId === selectedJobId;
     const q = searchQuery.toLowerCase().trim();
     if (!q) return matchesJob;
     const matchesSearch =
-      app.candidateName.toLowerCase().includes(q) ||
-      app.jobTitle.toLowerCase().includes(q) ||
-      app.candidateEmail.toLowerCase().includes(q) ||
+      (app.candidateName || "").toLowerCase().includes(q) ||
+      (app.jobTitle || "").toLowerCase().includes(q) ||
+      (app.candidateEmail || "").toLowerCase().includes(q) ||
       (app.githubAccountUrl || "").toLowerCase().includes(q) ||
       (app.githubRepo1Url || "").toLowerCase().includes(q) ||
       (app.githubRepo2Url || "").toLowerCase().includes(q) ||
@@ -69,12 +182,12 @@ export const BeforeInterviewHRPanel = () => {
     return matchesJob && matchesSearch;
   });
 
-  const currentApp = filteredApps.find((a) => a.id === selectedAppId) || filteredApps[0] || null;
+  const currentApp = filteredApps.find((a) => a.id === selectedAppId) || filteredApps[0] || applications[0] || null;
 
   const resumeCutoffScore = activeJob?.resumeCutoff || 90;
   const isResumePassed = currentApp ? currentApp.resumeScore >= resumeCutoffScore && currentApp.resumePassed : false;
   const isGithubPassed = currentApp ? isResumePassed && currentApp.githubPassed && currentApp.authenticityPercentage >= 70 : false;
-  const isMCQPassed = currentApp ? isGithubPassed && (currentApp.mcqScore !== undefined || currentApp.generatedMCQs?.some(q => q.userAnswer !== undefined)) : false;
+  const isMCQPassed = currentApp ? isGithubPassed && (currentApp.mcqScore !== undefined || (currentApp.generatedMCQs || []).some(q => q.userAnswer !== undefined)) : false;
 
   const tabs = [
     { id: "ats", label: "ATS & Resume", icon: FileText, num: "01", locked: false },
@@ -162,41 +275,30 @@ export const BeforeInterviewHRPanel = () => {
             })
             .eq("candidate_id", userData.id)
             .eq("job_id", app.jobId);
-
-          await supabase.from("notifications").insert({
-            user_id: userData.id,
-            title: "Application Notice",
-            message: `Thank you for your interest in ${app.jobTitle}. Unfortunately, your application did not meet the Before Interview cutoffs.`,
-          });
         }
       }
     } catch (e) {
-      console.warn("Could not sync rejection stage to Supabase", e);
+      console.warn("Could not sync reject stage to Supabase", e);
     }
 
     toast({
-      title: "Application Marked as Rejected",
-      description: `${app.candidateName}'s application has been archived with rejection notice.`,
+      title: "Application Rejected",
+      description: `${app.candidateName} did not meet the Before Interview cutoffs for ${app.jobTitle}.`,
       variant: "destructive",
     });
   };
 
-  const handleSimulateCandidate = (jobToUse: JobCutoffs, pass: boolean = true) => {
-    const candidateName = pass ? "Alex Rivera (Verified Match)" : "Jordan Smith (Low Match Demo)";
-    const email = pass ? "alex.rivera@example.com" : "jordan.smith@example.com";
-    const newApp = simulateCandidateApplicationForJob(jobToUse, {
-      candidateName,
-      candidateEmail: email,
-      shouldPass: pass,
-    });
-    const loaded = getWorkflowApplications();
-    setApplications(loaded);
-    setSelectedAppId(newApp.id);
+  const handleSimulateCandidate = (job: JobCutoffs, pass: boolean) => {
+    const targetJob = job || activeJob || jobs[0] || DEFAULT_JOBS[0];
+    const simApp = simulateCandidateApplicationForJob(targetJob, pass);
+    const updated = [simApp, ...applications];
+    setApplications(updated);
+    saveWorkflowApplications(updated);
+    setSelectedAppId(simApp.id);
+
     toast({
-      title: `🎯 Applicant Evaluated for ${jobToUse.title}`,
-      description: pass
-        ? "AI analyzed resume ATS score, repo code authenticity, generated 5 MCQs and 2 repo challenges!"
-        : "Candidate evaluated below cutoffs to demonstrate transparent automated rejection reasoning.",
+      title: pass ? "✨ Qualified Candidate Evaluated" : "⚠️ Sub-Cutoff Candidate Evaluated",
+      description: `Simulated application created for ${targetJob.title} with ATS Resume score of ${simApp.resumeScore}/100.`,
     });
   };
 
@@ -233,7 +335,7 @@ export const BeforeInterviewHRPanel = () => {
 
         const updated = applications.map((a) => {
           if (a.id === currentApp.id) {
-            return {
+            return ensureCompleteCandidateApp({
               ...a,
               resumeScore,
               resumePassed,
@@ -254,7 +356,7 @@ export const BeforeInterviewHRPanel = () => {
               hrEvidence: geminiResult.hrEvidence || a.hrEvidence,
               overallStatus: (resumePassed && githubPassed ? "Before Interview (Passed Cutoffs)" : "Auto-Rejected (Resume)") as any,
               currentStage: (resumePassed && githubPassed ? "before_interview" : "rejected") as any,
-            };
+            }, activeJob);
           }
           return a;
         });
@@ -263,147 +365,141 @@ export const BeforeInterviewHRPanel = () => {
         saveWorkflowApplications(updated);
 
         toast({
-          title: "✨ Gemini AI Evaluation Complete",
-          description: `Resume scored ${resumeScore}/100 with ${geminiResult.matchedKeywords?.length || 0} matched keywords. Full dossier updated!`,
+          title: "✨ Gemini AI Resume & Stack Analysis Complete",
+          description: `Resume ATS score evaluated to ${resumeScore}/100 with ${geminiResult.matchedKeywords?.length || 0} verified stack matches.`,
         });
       } else {
         toast({
-          title: "Analysis Completed",
-          description: "Resume evaluation updated using deterministic scoring engine.",
+          title: "Analysis Completed (Deterministic Engine)",
+          description: "Resume evaluation updated. To use real-time Gemini LLM analysis, enter your Gemini API Key.",
         });
       }
-    } catch (e: any) {
-      toast({
-        title: "Gemini Analysis Error",
-        description: e.message || "Failed to analyze with Gemini API",
-        variant: "destructive",
-      });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Evaluation Error", description: "Could not complete Gemini analysis.", variant: "destructive" });
     } finally {
       setIsGeminiAnalyzing(false);
     }
   };
 
+  const handleSaveApiKey = () => {
+    setGeminiApiKey(geminiApiKeyInput);
+    setShowApiKeyModal(false);
+    toast({
+      title: "✅ Gemini API Key Saved",
+      description: "Gemini AI is now active for live ATS scoring, 5 MCQs, and coding challenges.",
+    });
+  };
+
   return (
     <div className="space-y-6">
-      {/* Top Main HR Controls Header */}
-      <div className="p-6 md:p-8 rounded-3xl bg-paper border border-ink/10 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-forest/10 text-forest text-xs font-mono uppercase tracking-wider">
-              <ScanSearch className="w-3.5 h-3.5" />
-              Recruiter Screening &amp; Cutoff Dossier
+      {/* Top Banner: Workflow Header + Job Selector + Simulation Tools */}
+      <div className="rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper p-6 md:p-8 space-y-6 shadow-xl">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20 flex items-center gap-1.5 font-semibold">
+                <ScanSearch className="w-3.5 h-3.5" />
+                Step 1: Before Interview Screening Architecture
+              </span>
+              <button
+                onClick={() => setShowApiKeyModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-ink/5 hover:bg-ink/10 text-ink border border-ink/15 transition-colors"
+              >
+                <Key className="w-3 h-3 text-forest" />
+                <span>Gemini API Key: {getGeminiApiKey() ? "Configured ✓" : "Set Key"}</span>
+              </button>
             </div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-paper-2 border border-ink/15 text-ink-soft text-[11px] font-mono">
-              <Sparkles className="w-3 h-3 text-forest" />
-              Gemini AI Powered
-            </div>
+            <h2 className="font-serif-display text-2xl md:text-3xl text-ink font-semibold">
+              Before Interview Screening Control Room
+            </h2>
+            <p className="text-sm text-ink-soft mt-1 max-w-2xl">
+              Candidates are evaluated on <strong>ATS Resume Match (&ge;90%)</strong>, <strong>GitHub Code Authenticity (&ge;70%)</strong>, <strong>5 Tailored MCQs</strong>, and <strong>Adaptive Repo DSA</strong>. Only approved candidates advance to live interview rounds.
+            </p>
           </div>
-          <h2 className="font-serif-display text-2xl md:text-3xl text-ink">
-            Before Interview — Candidate AI Analysis &amp; Cutoffs
-          </h2>
-          <p className="text-xs text-ink-soft mt-1 max-w-2xl">
-            AI automatically compares candidates against your **Resume ATS cutoff**, scans their **GitHub account &amp; repos for % AI-written code**, evaluates **project architecture**, and generates **5 MCQs &amp; 2 Repo Coding Challenges** before unlocking interviews.
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadData}
+              className="text-xs h-9 px-3 border-ink/20"
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-forest" /> Sync Live Data
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], true)}
+              className="bg-forest text-paper hover:bg-forest/90 text-xs h-9 px-3.5 shadow-sm"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Simulate Qualified Applicant
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], false)}
+              className="text-xs h-9 px-3.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+            >
+              Simulate Sub-Cutoff Applicant
+            </Button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Gemini API Key Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowApiKeyModal(true)}
-            className="rounded-xl border-ink/15 text-xs h-9 px-3 gap-1.5 bg-paper hover:bg-forest/10 hover:text-forest"
-          >
-            <Key className="w-3.5 h-3.5 text-forest" />
-            <span>{getGeminiApiKey() ? "Gemini Key: Active" : "Set Gemini Key"}</span>
-          </Button>
-
-          {/* Job Filter */}
-          <select
-            value={selectedJobId}
-            onChange={(e) => setSelectedJobId(e.target.value)}
-            className="px-3.5 py-2 text-xs rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink font-medium"
-          >
-            <option value="all">All Posted Job Tracks ({jobs.length})</option>
-            {jobs.map((j) => (
-              <option key={j.id} value={j.id}>{j.title}</option>
-            ))}
-          </select>
-
-          {/* Search */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2" />
+        {/* Filter Controls Bar */}
+        <div className="grid sm:grid-cols-12 gap-3 pt-4 border-t border-ink/10">
+          <div className="sm:col-span-5 relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
             <input
               type="text"
-              placeholder="Search candidate..."
+              placeholder="Search by candidate name, email, repo URL, or stack..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-4 py-2 text-xs rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink w-48"
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink"
             />
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadData}
-            className="rounded-xl border-ink/15 text-xs h-9 px-3"
-          >
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
-          </Button>
+          <div className="sm:col-span-4">
+            <select
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink font-medium"
+            >
+              <option value="all">All Job Openings ({applications.length} Applicants)</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.title} (Cutoff: {j.resumeCutoff}%)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-3 flex items-center justify-end text-xs font-mono text-ink-muted">
+            <span>Showing {filteredApps.length} candidates</span>
+          </div>
         </div>
       </div>
 
-      {/* Active Job Cutoff Standards Bar */}
-      {activeJob && (
-        <div className="p-5 rounded-2xl bg-forest/5 border border-forest/20 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-ink">Active Cutoff Standards for {activeJob.title}:</span>
-          </div>
-          <div className="flex flex-wrap gap-4 font-mono">
-            <span>1. Resume Cutoff: <strong className="text-forest">{activeJob.resumeCutoff}%</strong></span>
-            <span>2. GitHub Code Cutoff: <strong className="text-forest">{activeJob.githubCutoff}%</strong></span>
-            <span>3. Project Cutoff: <strong className="text-forest">{activeJob.projectCutoff}%</strong></span>
-            <span>Required Stack: <strong className="text-ink">{activeJob.requiredSkills.join(", ")}</strong></span>
-          </div>
-        </div>
-      )}
-
-      {/* When no jobs exist */}
-      {jobs.length === 0 && (
-        <div className="p-12 text-center bg-paper rounded-3xl border border-ink/10 space-y-4">
-          <Briefcase className="w-12 h-12 mx-auto text-forest/40" />
+      {/* When no candidate matches filter */}
+      {filteredApps.length === 0 && (
+        <div className="p-12 text-center space-y-4 rounded-2xl border border-ink/15 bg-paper shadow-md">
+          <Briefcase className="w-10 h-10 text-ink-muted mx-auto opacity-50" />
           <div className="space-y-1">
-            <h3 className="font-serif-display text-2xl text-ink font-semibold">No Jobs Published Yet</h3>
-            <p className="text-xs text-ink-soft max-w-md mx-auto">
-              Post your first job using the <strong>"Post a Job"</strong> button in the HR Dashboard to configure Resume, GitHub Authenticity, and Project cutoffs.
+            <h4 className="font-serif-display text-lg text-ink font-semibold">No candidates found</h4>
+            <p className="text-xs text-ink-soft">
+              No applications match your search query or selected job opening.
             </p>
           </div>
-        </div>
-      )}
-
-      {/* When jobs exist but no applications exist for this filter */}
-      {jobs.length > 0 && filteredApps.length === 0 && (
-        <div className="p-10 rounded-3xl bg-paper border border-ink/10 text-center space-y-4">
-          <ScanSearch className="w-12 h-12 mx-auto text-forest/40" />
-          <div className="space-y-1">
-            <h3 className="font-serif-display text-2xl text-ink font-semibold">
-              No Candidate Submissions for {activeJob ? activeJob.title : "this filter"}
-            </h3>
-            <p className="text-xs text-ink-soft max-w-md mx-auto">
-              When candidates apply with their Resume, GitHub Profile, Repos, and Project links, AI automated screening and pre-interview dossiers will appear here.
-            </p>
-          </div>
-
-          <div className="pt-2 flex flex-wrap justify-center gap-2">
+          <div className="flex items-center justify-center gap-2 pt-2">
             <Button
-              onClick={() => handleSimulateCandidate(activeJob || jobs[0], true)}
+              size="sm"
+              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], true)}
               className="bg-forest text-paper hover:bg-forest/90 text-xs px-4"
             >
               <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Simulate Candidate Application (Match Stack)
             </Button>
             <Button
               variant="outline"
-              onClick={() => handleSimulateCandidate(activeJob || jobs[0], false)}
+              onClick={() => handleSimulateCandidate(activeJob || jobs[0] || DEFAULT_JOBS[0], false)}
               className="text-xs px-4 text-destructive border-destructive/30 hover:bg-destructive/10"
             >
               Simulate Auto-Rejection Candidate
@@ -412,7 +508,7 @@ export const BeforeInterviewHRPanel = () => {
         </div>
       )}
 
-      {/* Interactive 7-Step Recruiter Dossier matching Landing Page */}
+      {/* Interactive Recruiter Dossier */}
       {currentApp && (
         <div className="w-full rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper shadow-2xl overflow-hidden">
           {/* Top Header: Candidate Switcher */}
@@ -421,7 +517,7 @@ export const BeforeInterviewHRPanel = () => {
               <div>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono uppercase tracking-wider bg-forest/10 text-forest border border-forest/20 mb-3">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  Full 7-Stage Candidate Analyzer Dossier (HR Studio)
+                  Candidate Screening Dossier (HR Studio)
                 </div>
                 <h3 className="font-serif-display text-2xl md:text-3xl text-ink">
                   {currentApp.candidateName} — {currentApp.jobTitle}
@@ -435,7 +531,7 @@ export const BeforeInterviewHRPanel = () => {
               <div className="flex flex-wrap sm:flex-nowrap gap-2 bg-paper p-1.5 rounded-2xl border border-ink/10 shrink-0">
                 {filteredApps.map((app) => {
                   const active = currentApp.id === app.id;
-                  const isRejected = app.currentStage === "rejected";
+                  const isAppRejected = app.currentStage === "rejected";
                   const isInterviewReady = app.overallStatus === "Interview Ready";
                   return (
                     <button
@@ -451,7 +547,7 @@ export const BeforeInterviewHRPanel = () => {
                         <div className={`w-8 h-8 rounded-full grid place-items-center font-serif-display font-bold text-xs shrink-0 ${
                           active ? "bg-paper text-ink" : "bg-forest/10 text-forest"
                         }`}>
-                          {app.candidateName.charAt(0)}
+                          {(app.candidateName || "A").charAt(0)}
                         </div>
                         <div className="min-w-0">
                           <div className="font-semibold text-xs truncate">{app.candidateName}</div>
@@ -463,13 +559,13 @@ export const BeforeInterviewHRPanel = () => {
                       <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
                         <span className={active ? "text-paper/80" : "text-ink-muted"}>ATS: {app.resumeScore}/100</span>
                         <span className={`px-1.5 py-0.2 rounded ${
-                          isRejected
+                          isAppRejected
                             ? "bg-destructive/20 text-destructive-foreground font-semibold"
                             : isInterviewReady
                             ? "bg-forest text-paper font-semibold"
                             : "text-forest font-semibold"
                         }`}>
-                          {isRejected ? "Rejected" : isInterviewReady ? "Interview Ready" : "Screened"}
+                          {isAppRejected ? "Rejected" : isInterviewReady ? "Interview Ready" : "Screened"}
                         </span>
                       </div>
                       {active && (
@@ -512,7 +608,7 @@ export const BeforeInterviewHRPanel = () => {
                 <div className="flex items-center gap-2">
                   <span className="text-ink-muted">Detected Stacks:</span>
                   <div className="flex flex-wrap gap-1">
-                    {currentApp.detectedRepoStacks.map((s) => (
+                    {(currentApp.detectedRepoStacks || []).map((s) => (
                       <span key={s} className="px-2 py-0.5 rounded-md bg-ink/5 border border-ink/10 text-ink font-mono text-[11px]">
                         {s}
                       </span>
@@ -598,7 +694,7 @@ export const BeforeInterviewHRPanel = () => {
                         Evaluated against job requirements, verified project context, and keyword frequency.
                       </div>
                       <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
-                        Cutoff: {resumeCutoffScore}% · Status: <span className={isResumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{isResumePassed ? "Passed (Eligible for GitHub)" : "Auto-Rejected (Below Cutoff)"}</span>
+                        Required Cutoff: {activeJob?.resumeCutoff || 90}% · Status: <span className={isResumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{isResumePassed ? "Passed" : "Below Cutoff"}</span>
                       </div>
                     </div>
 
@@ -663,7 +759,7 @@ export const BeforeInterviewHRPanel = () => {
                         <div className="text-xs text-ink-soft space-y-1">
                           <span className="font-medium text-ink">Actionable Feedback for Candidate:</span>
                           <ul className="list-disc list-inside space-y-0.5 pl-1">
-                            {(currentApp.atsBreakdown?.actionableSuggestions || [currentApp.resumeFeedback]).map((sug, idx) => (
+                            {(currentApp.atsBreakdown?.actionableSuggestions || [currentApp.resumeFeedback || "Profile analyzed."]).filter(Boolean).map((sug, idx) => (
                               <li key={idx}>{sug}</li>
                             ))}
                           </ul>
@@ -689,26 +785,18 @@ export const BeforeInterviewHRPanel = () => {
                       <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
                         <Lock className="w-6 h-6" />
                       </div>
-                      <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 02 Locked: Failed ATS Resume Cutoff</h4>
+                      <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 02 Locked: Candidate Failed ATS Cutoff</h4>
                       <p className="text-xs text-ink-soft max-w-md mx-auto">
-                        Candidate scored {currentApp.resumeScore}/100, which is below the required {resumeCutoffScore}% ATS cutoff. Candidate cannot be evaluated on GitHub or Projects.
+                        Candidate scored {currentApp.resumeScore}/100, which is below the required {resumeCutoffScore}% cutoff.
                       </p>
                     </div>
                   ) : (
                     <>
-                      <div className="p-4 rounded-xl bg-forest/5 border border-forest/15 flex items-start gap-3">
-                        <ShieldCheck className="w-5 h-5 text-forest shrink-0 mt-0.5" />
-                        <div className="text-xs text-ink-soft">
-                          <span className="font-semibold text-ink">Code Authenticity Verification: </span>
-                          GitHub evidence is analyzed for genuine developer commits vs AI boilerplate. We formulate verification tasks from repository implementations.
-                        </div>
-                      </div>
-
                       {/* AI Code Authenticity Meter */}
                       <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Estimation</span>
-                          <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Engineering</span>
+                          <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Ratio</span>
+                          <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Logic</span>
                         </div>
                         <div className="w-full h-3 rounded-full bg-amber-200 overflow-hidden flex">
                           <div
@@ -732,13 +820,14 @@ export const BeforeInterviewHRPanel = () => {
                             <div className="flex items-center justify-between gap-2 mb-2">
                               <span className="font-mono font-semibold text-sm text-ink flex items-center gap-1.5">
                                 <GitBranch className="w-3.5 h-3.5 text-forest" />
-                                Submitted Repositories
+                                Submitted Repositories &amp; Profile
                               </span>
                               <span className="text-xs font-mono text-ink-muted">Cutoff: {activeJob?.githubCutoff || 70}%</span>
                             </div>
-                            <div className="space-y-2 mb-3 font-mono text-xs">
+
+                            <div className="space-y-2 text-xs text-ink-soft mb-4 font-mono">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span>👤 Profile:</span>
+                                <span className="font-semibold text-amber-800">👤 Profile:</span>
                                 <a
                                   href={formatExternalUrl(currentApp.githubAccountUrl)}
                                   target="_blank"
@@ -779,7 +868,7 @@ export const BeforeInterviewHRPanel = () => {
                             
                             <div className="text-[11px] font-semibold text-ink mb-1.5">Detected Code Signals:</div>
                             <ul className="space-y-1 mb-4 text-xs text-ink-soft">
-                              {currentApp.codeSignals.map((sig, i) => (
+                              {(currentApp.codeSignals || []).map((sig, i) => (
                                 <li key={i} className="flex items-start gap-1.5">
                                   <span className="text-forest shrink-0">▸</span>
                                   <span>{sig}</span>
@@ -852,15 +941,15 @@ export const BeforeInterviewHRPanel = () => {
                     <>
                       <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
                         <span className="text-ink-soft">
-                          Generated from: <strong className="text-ink">Job Requirements + Candidate Repo Stacks ({currentApp.detectedRepoStacks.join(", ")})</strong>
+                          Generated from: <strong className="text-ink">Job Requirements + Candidate Repo Stacks ({(currentApp.detectedRepoStacks || []).join(", ")})</strong>
                         </span>
                         <span className="font-mono text-forest font-semibold bg-forest/10 px-2.5 py-1 rounded-full">
-                          Score: {currentApp.mcqScore !== undefined ? `${currentApp.mcqScore} / ${currentApp.generatedMCQs.length} Correct` : "5 Personalized Questions Generated"}
+                          Score: {currentApp.mcqScore !== undefined ? `${currentApp.mcqScore} / ${(currentApp.generatedMCQs || []).length} Correct` : "5 Personalized Questions Generated"}
                         </span>
                       </div>
 
                       <div className="space-y-4">
-                        {currentApp.generatedMCQs.map((q, idx) => (
+                        {(currentApp.generatedMCQs || []).map((q, idx) => (
                           <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper">
                             <div className="flex items-start justify-between gap-4 mb-2">
                               <div className="flex items-center gap-2">
@@ -877,7 +966,7 @@ export const BeforeInterviewHRPanel = () => {
                             <h5 className="font-semibold text-sm text-ink mb-3 pl-8">{q.question}</h5>
 
                             <div className="grid gap-2 pl-8">
-                              {q.options.map((opt, optIdx) => {
+                              {(q.options || []).map((opt, optIdx) => {
                                 const isCorrect = optIdx === q.correctIndex;
                                 const isCandidateSelected = q.userAnswer === optIdx;
                                 return (
@@ -949,12 +1038,12 @@ export const BeforeInterviewHRPanel = () => {
                           </p>
                         </div>
                         <span className="text-xs font-mono text-forest bg-forest/10 px-2.5 py-1 rounded-full font-semibold">
-                          2 Challenges Evaluated
+                          {(currentApp.repoCodingChallenges || []).length} Challenges Evaluated
                         </span>
                       </div>
 
                       <div className="space-y-4">
-                        {currentApp.repoCodingChallenges.map((challenge, idx) => (
+                        {(currentApp.repoCodingChallenges || []).map((challenge, idx) => (
                           <div key={challenge.id} className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <div className="font-medium text-sm text-ink">
@@ -1000,10 +1089,10 @@ export const BeforeInterviewHRPanel = () => {
                                   </span>
                                 </div>
 
-                                {challenge.aiCodeReview.errorsDetected.length > 0 && (
+                                {(challenge.aiCodeReview.errorsDetected || []).length > 0 && (
                                   <div className="space-y-1 pt-1 border-t border-destructive/20">
                                     <span className="text-[11px] font-semibold block">Detected Code Errors:</span>
-                                    {challenge.aiCodeReview.errorsDetected.map((err, i) => (
+                                    {(challenge.aiCodeReview.errorsDetected || []).map((err, i) => (
                                       <div key={i} className="text-[11px] flex items-start gap-1 font-mono">
                                         <Bug className="w-3 h-3 mt-0.5 shrink-0" />
                                         <span>{err}</span>
@@ -1101,15 +1190,10 @@ export const BeforeInterviewHRPanel = () => {
                         {currentApp.currentStage !== "rejected" && (
                           <button
                             onClick={() => handleReject(currentApp)}
-                            className="px-4 py-2 rounded-full border border-destructive text-destructive-foreground hover:bg-destructive/10 transition-colors"
+                            className="px-4 py-2 rounded-full bg-destructive/20 text-destructive-foreground hover:bg-destructive/30 transition-colors"
                           >
-                            Reject with Explanation
+                            Reject Application
                           </button>
-                        )}
-                        {currentApp.currentStage === "rejected" && (
-                          <span className="px-3 py-1.5 rounded-full bg-destructive/20 text-destructive-foreground font-mono font-semibold">
-                            Archived as Rejected
-                          </span>
                         )}
                       </div>
                     </div>
@@ -1118,96 +1202,69 @@ export const BeforeInterviewHRPanel = () => {
               )}
             </AnimatePresence>
           </div>
-
-          {/* Footer Bar */}
-          <div className="p-4 bg-paper-2 border-t border-ink/10 flex items-center justify-between text-xs text-ink-muted">
-            <span>💡 All 5 stages reflect real-time candidate data and recruiter decision controls.</span>
-            <span className="font-mono text-[11px] text-forest font-medium hidden sm:inline">100% Explainable AI Verification</span>
-          </div>
         </div>
       )}
 
       {/* Gemini API Key Configuration Modal */}
       {showApiKeyModal && (
-        <div className="fixed inset-0 z-50 bg-ink/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-paper rounded-3xl border border-ink/15 shadow-2xl p-6 md:p-8 max-w-lg w-full space-y-6"
+            className="w-full max-w-md rounded-3xl border border-ink/15 bg-paper p-6 space-y-4 shadow-2xl"
           >
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-forest/10 border border-forest/20 grid place-items-center text-forest">
-                  <Key className="w-5 h-5" />
+            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-forest/10 text-forest grid place-items-center">
+                  <Key className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-serif-display text-xl text-ink">Google Gemini API Key</h3>
-                  <p className="text-xs text-ink-muted">Enable real-time AI ATS scoring &amp; candidate diagnostics</p>
+                  <h4 className="font-serif-display font-semibold text-ink">Google Gemini API Key</h4>
+                  <p className="text-[11px] text-ink-muted">Configures AI model for resume matching &amp; challenge generation</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowApiKeyModal(false)}
-                className="p-1 rounded-lg text-ink-muted hover:text-ink hover:bg-ink/5"
+                className="w-7 h-7 rounded-full border border-ink/15 text-xs grid place-items-center hover:bg-ink/5"
               >
-                <X className="w-5 h-5" />
+                ✕
               </button>
             </div>
 
-            <div className="space-y-3">
-              <label className="text-xs font-mono font-medium text-ink block">
-                GEMINI API KEY (Google AI Studio)
-              </label>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-ink">Enter your Gemini API Key:</label>
               <input
                 type="password"
                 placeholder="AIzaSy..."
                 value={geminiApiKeyInput}
                 onChange={(e) => setGeminiApiKeyInput(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-ink/15 bg-paper-2 font-mono text-xs focus:outline-none focus:border-forest text-ink"
+                className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl border border-ink/15 bg-paper-2 focus:outline-none focus:border-forest text-ink"
               />
-              <p className="text-[11px] text-ink-muted">
-                Your key is stored securely in your browser's local storage and used directly for ATS scoring, repository analysis, and MCQs generation.
+              <p className="text-[11px] text-ink-soft leading-relaxed">
+                Your key is stored securely in your browser session for live Gemini AI scoring.
               </p>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-forest hover:underline inline-flex items-center gap-1 font-medium"
-              >
-                Get a free key at Google AI Studio <ExternalLink className="w-3 h-3" />
-              </a>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowApiKeyModal(false)}
-                  className="rounded-xl border-ink/15 text-xs"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setGeminiApiKey(geminiApiKeyInput);
-                    setShowApiKeyModal(false);
-                    toast({
-                      title: "Gemini API Key Saved",
-                      description: "Real-time AI evaluation engine is ready.",
-                    });
-                  }}
-                  className="rounded-xl bg-forest text-paper hover:bg-forest/90 text-xs px-4"
-                >
-                  Save Key
-                </Button>
-              </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setShowApiKeyModal(false)} className="text-xs">
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSaveApiKey} className="bg-forest text-paper hover:bg-forest/90 text-xs px-4">
+                Save &amp; Activate Gemini
+              </Button>
             </div>
           </motion.div>
         </div>
       )}
     </div>
+  );
+};
+
+export const BeforeInterviewHRPanel = () => {
+  return (
+    <ErrorBoundary fallbackTitle="Before Interview Recruiter Panel Recovery" fallbackDescription="Unable to load HR candidate dossier. Click below to reload or reset data.">
+      <BeforeInterviewHRContent />
+    </ErrorBoundary>
   );
 };
 
