@@ -5,7 +5,7 @@ import {
   ShieldCheck, CheckCircle2, AlertCircle, Sparkles, HelpCircle,
   ChevronRight, ExternalLink, Layers, Database, Cpu, Terminal,
   RefreshCw, Search, Briefcase, Play, Bug, Check, X, Eye, ArrowRight,
-  Key, Settings, Zap
+  Key, Settings, Zap, Compass, CheckCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -40,8 +40,8 @@ export const BeforeInterviewHRContent = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [isGeminiAnalyzing, setIsGeminiAnalyzing] = useState(false);
 
-  // 5 HR Screening Dossier Tabs
-  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "hrevidence">("ats");
+  // 7 Stages matching Landing Page & HR Architecture
+  const [activeTab, setActiveTab] = useState<"ats" | "github" | "mcq" | "dsa" | "interview" | "skillmap" | "hrevidence">("ats");
 
   const loadData = async () => {
     let loadedApps = getWorkflowApplications();
@@ -56,10 +56,10 @@ export const BeforeInterviewHRContent = () => {
             title: j.title,
             department: j.department || "Engineering",
             requiredSkills: Array.isArray(j.skills_required) ? j.skills_required : ["TypeScript", "React", "Node.js"],
-            resumeCutoff: 90,
+            resumeCutoff: j.resume_cutoff || 90,
             githubCutoff: 70,
             projectCutoff: 70,
-            description: j.description || j.title,
+            description: j.job_description || j.title,
           }));
           saveWorkflowJobs(loadedJobs);
         }
@@ -100,8 +100,8 @@ export const BeforeInterviewHRContent = () => {
               githubRepo1Url: "https://github.com",
               projectArchitectureSummary: "Modular fullstack application architecture",
               resumeScore: rScore,
-              resumePassed: rScore >= (j.resumeCutoff || 90),
-              resumeFeedback: `Resume matches required qualifications for ${j.title || "the role"}.`,
+              resumePassed: rScore >= (targetJob.resumeCutoff || 90),
+              resumeFeedback: `Resume matches required qualifications for ${targetJob.title}.`,
               matchedKeywords: reqSkills,
               atsBreakdown: {
                 roleAlignment: rScore,
@@ -118,8 +118,8 @@ export const BeforeInterviewHRContent = () => {
               detectedRepoStacks: reqSkills,
               githubFeedback: "Authentic commit history with clean software modularity.",
               codeSignals: ["Modular repository pattern", "Verified domain assertions", "Clean commit lineage"],
-              generatedMCQs: generateDynamicMCQs(reqSkills, j.title || targetJob.title),
-              repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, j.title || targetJob.title),
+              generatedMCQs: generateDynamicMCQs(reqSkills, targetJob.title),
+              repoCodingChallenges: generateDynamicCodingChallenges(reqSkills, targetJob.title),
               aiInterviewDialogue: [],
               skillMap: [],
               improvementPlan: [],
@@ -149,8 +149,16 @@ export const BeforeInterviewHRContent = () => {
     // If still empty, simulate demonstration candidates so HR panel is immediately populated
     if (!loadedApps || loadedApps.length === 0) {
       const primaryJob = loadedJobs[0] || DEFAULT_JOBS[0];
-      const demo1 = simulateCandidateApplicationForJob(primaryJob, true);
-      const demo2 = simulateCandidateApplicationForJob(primaryJob, false);
+      const demo1 = simulateCandidateApplicationForJob(primaryJob, {
+        candidateName: "Alex Rivera",
+        candidateEmail: "alex.rivera@example.com",
+        shouldPass: true,
+      });
+      const demo2 = simulateCandidateApplicationForJob(primaryJob, {
+        candidateName: "Jordan Smith",
+        candidateEmail: "jordan.smith@example.com",
+        shouldPass: false,
+      });
       loadedApps = [demo1, demo2];
       saveWorkflowApplications(loadedApps);
     }
@@ -194,7 +202,9 @@ export const BeforeInterviewHRContent = () => {
     { id: "github", label: "GitHub & Projects", icon: GitBranch, num: "02", locked: !isResumePassed },
     { id: "mcq", label: "5 Personalized MCQs", icon: ListChecks, num: "03", locked: !isGithubPassed },
     { id: "dsa", label: "Adaptive DSA Sandbox", icon: Code2, num: "04", locked: !isMCQPassed },
-    { id: "hrevidence", label: "Recruiter Decision", icon: ShieldCheck, num: "05", locked: false },
+    { id: "interview", label: "Dynamic AI Interview", icon: Bot, num: "05", locked: !isMCQPassed },
+    { id: "skillmap", label: "Skill Map & Plan", icon: Award, num: "06", locked: !isResumePassed },
+    { id: "hrevidence", label: "HR Evidence Decision", icon: ShieldCheck, num: "07", locked: false },
   ];
 
   const handleAdvanceToInterview = async (app: CandidateApplicationSubmission) => {
@@ -290,7 +300,11 @@ export const BeforeInterviewHRContent = () => {
 
   const handleSimulateCandidate = (job: JobCutoffs, pass: boolean) => {
     const targetJob = job || activeJob || jobs[0] || DEFAULT_JOBS[0];
-    const simApp = simulateCandidateApplicationForJob(targetJob, pass);
+    const simApp = simulateCandidateApplicationForJob(targetJob, {
+      candidateName: pass ? "Alex Rivera" : "Jordan Smith",
+      candidateEmail: pass ? "alex.rivera@example.com" : "jordan.smith@example.com",
+      shouldPass: pass,
+    });
     const updated = [simApp, ...applications];
     setApplications(updated);
     saveWorkflowApplications(updated);
@@ -414,7 +428,7 @@ export const BeforeInterviewHRContent = () => {
               Before Interview Screening Control Room
             </h2>
             <p className="text-sm text-ink-soft mt-1 max-w-2xl">
-              Candidates are evaluated on <strong>ATS Resume Match (&ge;90%)</strong>, <strong>GitHub Code Authenticity (&ge;70%)</strong>, <strong>5 Tailored MCQs</strong>, and <strong>Adaptive Repo DSA</strong>. Only approved candidates advance to live interview rounds.
+              Candidates are evaluated on <strong>ATS Resume Match (&ge;{resumeCutoffScore}%)</strong>, <strong>GitHub Code Authenticity (&ge;70%)</strong>, <strong>5 Tailored MCQs</strong>, <strong>Adaptive DSA</strong>, and <strong>AI Interview Probing</strong>.
             </p>
           </div>
 
@@ -508,7 +522,7 @@ export const BeforeInterviewHRContent = () => {
         </div>
       )}
 
-      {/* Interactive Recruiter Dossier */}
+      {/* Interactive Recruiter Dossier Matching Screenshot Exactly */}
       {currentApp && (
         <div className="w-full rounded-2xl md:rounded-[28px] border border-ink/15 bg-paper shadow-2xl overflow-hidden">
           {/* Top Header: Candidate Switcher */}
@@ -619,9 +633,9 @@ export const BeforeInterviewHRContent = () => {
             </div>
           </div>
 
-          {/* 5 Stage Navigation Tabs */}
-          <div className="border-b border-ink/10 bg-paper overflow-x-auto scrollbar-none">
-            <div className="flex items-center min-w-max px-4">
+          {/* 7 Stage Navigation Tabs Matching Screenshot */}
+          <div className="border-b border-ink/10 bg-paper-2 overflow-x-auto scrollbar-none">
+            <div className="flex items-center min-w-max px-4 py-1">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -637,33 +651,33 @@ export const BeforeInterviewHRContent = () => {
                             ? `Candidate failed ATS Resume cutoff (${currentApp.resumeScore}/${resumeCutoffScore}%).`
                             : tab.id === "mcq"
                             ? "Requires passing ATS Resume and GitHub screening."
-                            : "Requires completing Stage 03 MCQs.",
+                            : "Requires completing prior screening stages.",
                           variant: "destructive",
                         });
                       } else {
                         setActiveTab(tab.id as any);
                       }
                     }}
-                    className={`flex items-center gap-2 py-4 px-4 text-xs font-medium border-b-2 transition-all relative ${
+                    className={`flex items-center gap-2 py-3 px-4 text-xs font-medium border-b-2 transition-all relative ${
                       isActive
-                        ? "border-forest text-forest font-semibold"
+                        ? "border-forest text-forest font-semibold bg-forest/5 rounded-t-lg"
                         : isLocked
-                        ? "border-transparent text-ink-muted/60 hover:text-ink-muted cursor-not-allowed"
+                        ? "border-transparent text-ink-muted/50 hover:text-ink-muted cursor-not-allowed"
                         : "border-transparent text-ink-soft hover:text-ink hover:border-ink/20"
                     }`}
                   >
-                    <span className="font-mono text-[10px] text-ink-muted">{tab.num}</span>
+                    <span className="font-mono text-[10px] text-ink-muted font-bold">{tab.num}</span>
                     <Icon className="w-4 h-4" />
                     <span>{tab.label}</span>
-                    {isLocked && <Lock className="w-3 h-3 text-ink-muted/70 ml-0.5" />}
+                    {isLocked && <span className="text-[10px] opacity-60 ml-0.5">🔒</span>}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Main Interactive Tab Content */}
-          <div className="p-6 md:p-10 bg-paper min-h-[460px]">
+          {/* Main Interactive Tab Content - Layout Matching Screenshot */}
+          <div className="p-6 md:p-8 bg-[#FBF9F4] min-h-[460px]">
             <AnimatePresence mode="wait">
               {/* TAB 1: ATS & RESUME */}
               {activeTab === "ats" && (
@@ -676,91 +690,126 @@ export const BeforeInterviewHRContent = () => {
                   className="space-y-6"
                 >
                   <div className="grid md:grid-cols-12 gap-6 items-start">
-                    <div className="md:col-span-4 p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col items-center text-center">
-                      <div className="text-xs uppercase font-mono tracking-widest text-ink-muted mb-3">ATS Compatibility Score</div>
-                      <div className="relative flex items-center justify-center">
-                        <div className={`w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center bg-paper shadow-inner ${
-                          isResumePassed ? "border-forest/30" : "border-destructive/30"
+                    {/* Left Circular Gauge Card */}
+                    <div className="md:col-span-4 p-8 rounded-3xl border border-ink/15 bg-paper flex flex-col items-center text-center shadow-sm">
+                      <div className="text-xs uppercase font-mono tracking-widest text-ink-muted mb-5 font-semibold">
+                        ATS COMPATIBILITY SCORE
+                      </div>
+                      <div className="relative flex items-center justify-center my-2">
+                        <div className={`w-32 h-32 rounded-full border-4 flex flex-col items-center justify-center bg-paper shadow-sm ${
+                          isResumePassed ? "border-forest/40" : "border-destructive/40"
                         }`}>
-                          <span className={`font-serif-display text-4xl font-bold ${
+                          <span className={`font-serif-display text-5xl font-bold leading-none ${
                             isResumePassed ? "text-forest" : "text-destructive"
                           }`}>
                             {currentApp.resumeScore}
                           </span>
-                          <span className="text-[10px] font-mono text-ink-muted uppercase">out of 100</span>
+                          <span className="text-[10px] font-mono text-ink-muted uppercase tracking-wider mt-1 font-semibold">
+                            OUT OF 100
+                          </span>
                         </div>
                       </div>
-                      <div className="mt-4 text-xs text-ink-soft leading-relaxed">
-                        Evaluated against job requirements, verified project context, and keyword frequency.
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted">
-                        Required Cutoff: {activeJob?.resumeCutoff || 90}% · Status: <span className={isResumePassed ? "text-forest font-semibold" : "text-destructive font-semibold"}>{isResumePassed ? "Passed" : "Below Cutoff"}</span>
+                      <p className="mt-5 text-xs text-ink-soft leading-relaxed max-w-[240px]">
+                        Evaluated against job description requirements, verified project context, and keyword frequency.
+                      </p>
+                      <div className="mt-4 pt-3 border-t border-ink/10 text-[11px] font-mono text-ink-muted w-full flex items-center justify-between">
+                        <span>Required Cutoff: {resumeCutoffScore}%</span>
+                        <span className={isResumePassed ? "text-forest font-bold" : "text-destructive font-bold"}>
+                          {isResumePassed ? "Passed ✓" : "Below Cutoff ✕"}
+                        </span>
                       </div>
                     </div>
 
+                    {/* Right Side Cards */}
                     <div className="md:col-span-8 space-y-4">
-                      <div className="p-5 rounded-2xl border border-ink/10 bg-paper">
-                        <h4 className="font-semibold text-sm text-ink mb-3 flex items-center gap-2">
+                      {/* Top Right: Detailed ATS Breakdown */}
+                      <div className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm space-y-4">
+                        <h4 className="font-semibold text-sm text-ink flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 text-forest" />
                           Detailed ATS Breakdown
                         </h4>
-                        <div className="grid sm:grid-cols-2 gap-4 text-xs">
-                          <div className="space-y-1">
+                        <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-xs">
+                          <div className="space-y-1.5">
                             <div className="flex justify-between text-ink-soft">
                               <span>Role Alignment</span>
-                              <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%</span>
+                              <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%</span>
                             </div>
-                            <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                              <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%` }} />
+                            <div className="w-full h-2.5 bg-ink/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-forest rounded-full transition-all duration-500"
+                                style={{ width: `${currentApp.atsBreakdown?.roleAlignment ?? currentApp.resumeScore}%` }}
+                              />
                             </div>
                           </div>
-                          <div className="space-y-1">
+
+                          <div className="space-y-1.5">
                             <div className="flex justify-between text-ink-soft">
                               <span>Skills Match</span>
-                              <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%</span>
+                              <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%</span>
                             </div>
-                            <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                              <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%` }} />
+                            <div className="w-full h-2.5 bg-ink/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-forest rounded-full transition-all duration-500"
+                                style={{ width: `${currentApp.atsBreakdown?.skillsMatch ?? currentApp.resumeScore}%` }}
+                              />
                             </div>
                           </div>
-                          <div className="space-y-1">
+
+                          <div className="space-y-1.5">
                             <div className="flex justify-between text-ink-soft">
                               <span>Project Impact Signals</span>
-                              <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.projectImpact ?? 82}%</span>
+                              <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.projectImpact ?? 84}%</span>
                             </div>
-                            <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                              <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.projectImpact ?? 82}%` }} />
+                            <div className="w-full h-2.5 bg-ink/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-forest rounded-full transition-all duration-500"
+                                style={{ width: `${currentApp.atsBreakdown?.projectImpact ?? 84}%` }}
+                              />
                             </div>
                           </div>
-                          <div className="space-y-1">
+
+                          <div className="space-y-1.5">
                             <div className="flex justify-between text-ink-soft">
                               <span>Formatting &amp; Structure</span>
-                              <span className="font-mono font-medium text-ink">{currentApp.atsBreakdown?.formatting ?? 90}%</span>
+                              <span className="font-mono font-bold text-ink">{currentApp.atsBreakdown?.formatting ?? 90}%</span>
                             </div>
-                            <div className="w-full h-2 bg-ink/10 rounded-full overflow-hidden">
-                              <div className="h-full bg-forest rounded-full" style={{ width: `${currentApp.atsBreakdown?.formatting ?? 90}%` }} />
+                            <div className="w-full h-2.5 bg-ink/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-forest rounded-full transition-all duration-500"
+                                style={{ width: `${currentApp.atsBreakdown?.formatting ?? 90}%` }}
+                              />
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="p-5 rounded-2xl border border-ink/10 bg-amber-500/5">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 mb-2">
+                      {/* Bottom Right: Missing Keywords & Actionable Feedback */}
+                      <div className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm space-y-4">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
                           <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                          Missing / Weak Keywords Detected:
+                          <span>Missing / Weak Keywords Detected:</span>
                         </div>
-                        <div className="flex flex-wrap gap-1.5 mb-3">
-                          {(currentApp.atsBreakdown?.missingKeywords || currentApp.missingKeywords || []).map((kw) => (
-                            <span key={kw} className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-900 font-mono text-[11px]">
+
+                        <div className="flex flex-wrap gap-2">
+                          {(currentApp.atsBreakdown?.missingKeywords?.length ? currentApp.atsBreakdown.missingKeywords : ["Distributed Caching", "Redis", "CI/CD Pipeline"]).map((kw) => (
+                            <span
+                              key={kw}
+                              className="px-3 py-1 rounded-full bg-[#FDF6EC] border border-[#FDE68A] text-[#B45309] font-mono text-xs font-medium"
+                            >
                               {kw}
                             </span>
                           ))}
                         </div>
-                        <div className="text-xs text-ink-soft space-y-1">
-                          <span className="font-medium text-ink">Actionable Feedback for Candidate:</span>
-                          <ul className="list-disc list-inside space-y-0.5 pl-1">
-                            {(currentApp.atsBreakdown?.actionableSuggestions || [currentApp.resumeFeedback || "Profile analyzed."]).filter(Boolean).map((sug, idx) => (
-                              <li key={idx}>{sug}</li>
+
+                        <div className="text-xs text-ink-soft space-y-2 pt-1 border-t border-ink/10">
+                          <span className="font-semibold text-ink block">Actionable Feedback for Candidate:</span>
+                          <ul className="list-disc list-inside space-y-1 pl-1 text-ink-soft">
+                            {(currentApp.atsBreakdown?.actionableSuggestions?.length ? currentApp.atsBreakdown.actionableSuggestions : [
+                              "Quantify edge model latency improvements (e.g., 'reduced inference latency by 42% on Jetson Nano').",
+                              "Add explicit mention of SQL query optimization & indexing in backend data layers.",
+                              "Clarify CI/CD deployment pipelines used for edge device fleet management."
+                            ]).map((sug, idx) => (
+                              <li key={idx} className="leading-relaxed">{sug}</li>
                             ))}
                           </ul>
                         </div>
@@ -781,9 +830,9 @@ export const BeforeInterviewHRContent = () => {
                   className="space-y-6"
                 >
                   {!isResumePassed ? (
-                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                    <div className="p-10 rounded-3xl bg-paper border border-ink/10 text-center space-y-3">
                       <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
-                        <Lock className="w-6 h-6" />
+                        <LockIcon />
                       </div>
                       <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 02 Locked: Candidate Failed ATS Cutoff</h4>
                       <p className="text-xs text-ink-soft max-w-md mx-auto">
@@ -793,7 +842,7 @@ export const BeforeInterviewHRContent = () => {
                   ) : (
                     <>
                       {/* AI Code Authenticity Meter */}
-                      <div className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
+                      <div className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-3 shadow-sm">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-semibold text-ink">Code Authenticity &amp; AI-Written Ratio</span>
                           <span className="font-mono text-forest font-bold">{currentApp.authenticityPercentage}% Authentic Human Logic</span>
@@ -815,7 +864,7 @@ export const BeforeInterviewHRContent = () => {
                       </div>
 
                       <div className="grid md:grid-cols-2 gap-6">
-                        <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
+                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper flex flex-col justify-between shadow-sm">
                           <div>
                             <div className="flex items-center justify-between gap-2 mb-2">
                               <span className="font-mono font-semibold text-sm text-ink flex items-center gap-1.5">
@@ -850,20 +899,6 @@ export const BeforeInterviewHRContent = () => {
                                   <ExternalLink className="w-3 h-3 shrink-0" />
                                 </a>
                               </div>
-                              {currentApp.githubRepo2Url && (
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span>📦 Repo 2:</span>
-                                  <a
-                                    href={formatExternalUrl(currentApp.githubRepo2Url)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 underline text-forest hover:text-forest/80 font-medium break-all"
-                                  >
-                                    <span>{currentApp.githubRepo2Url}</span>
-                                    <ExternalLink className="w-3 h-3 shrink-0" />
-                                  </a>
-                                </div>
-                              )}
                             </div>
                             
                             <div className="text-[11px] font-semibold text-ink mb-1.5">Detected Code Signals:</div>
@@ -886,7 +921,7 @@ export const BeforeInterviewHRContent = () => {
                         </div>
 
                         {/* Project Architecture */}
-                        <div className="p-6 rounded-2xl border border-ink/10 bg-paper-2 flex flex-col justify-between">
+                        <div className="p-6 rounded-3xl border border-ink/15 bg-paper flex flex-col justify-between shadow-sm">
                           <div>
                             <h4 className="font-semibold text-sm text-ink mb-2 flex items-center gap-2">
                               <Layers className="w-4 h-4 text-forest" />
@@ -928,9 +963,9 @@ export const BeforeInterviewHRContent = () => {
                   className="space-y-6"
                 >
                   {!isGithubPassed ? (
-                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                    <div className="p-10 rounded-3xl bg-paper border border-ink/10 text-center space-y-3">
                       <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive grid place-items-center mx-auto">
-                        <Lock className="w-6 h-6" />
+                        <LockIcon />
                       </div>
                       <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 03 Locked: Candidate Failed Prior Cutoffs</h4>
                       <p className="text-xs text-ink-soft max-w-md mx-auto">
@@ -939,7 +974,7 @@ export const BeforeInterviewHRContent = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="p-4 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between flex-wrap gap-2 text-xs">
+                      <div className="p-4 rounded-2xl bg-paper border border-ink/15 flex items-center justify-between flex-wrap gap-2 text-xs shadow-sm">
                         <span className="text-ink-soft">
                           Generated from: <strong className="text-ink">Job Requirements + Candidate Repo Stacks ({(currentApp.detectedRepoStacks || []).join(", ")})</strong>
                         </span>
@@ -950,7 +985,7 @@ export const BeforeInterviewHRContent = () => {
 
                       <div className="space-y-4">
                         {(currentApp.generatedMCQs || []).map((q, idx) => (
-                          <div key={q.id} className="p-5 rounded-2xl border border-ink/10 bg-paper">
+                          <div key={q.id} className="p-6 rounded-3xl border border-ink/15 bg-paper shadow-sm">
                             <div className="flex items-start justify-between gap-4 mb-2">
                               <div className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-full bg-forest text-paper text-xs font-mono font-semibold grid place-items-center shrink-0">
@@ -972,7 +1007,7 @@ export const BeforeInterviewHRContent = () => {
                                 return (
                                   <div
                                     key={optIdx}
-                                    className={`p-2.5 rounded-xl text-xs flex items-start gap-2.5 ${
+                                    className={`p-3 rounded-xl text-xs flex items-start gap-2.5 ${
                                       isCorrect
                                         ? "bg-forest/10 border border-forest/30 text-ink font-medium"
                                         : isCandidateSelected
@@ -1019,9 +1054,9 @@ export const BeforeInterviewHRContent = () => {
                   className="space-y-6"
                 >
                   {!isMCQPassed ? (
-                    <div className="p-10 rounded-3xl bg-paper-2 border border-ink/10 text-center space-y-3">
+                    <div className="p-10 rounded-3xl bg-paper border border-ink/10 text-center space-y-3">
                       <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-700 grid place-items-center mx-auto">
-                        <Lock className="w-6 h-6" />
+                        <LockIcon />
                       </div>
                       <h4 className="font-serif-display text-xl text-ink font-semibold">Stage 04 Locked: Candidate Has Not Finished MCQs</h4>
                       <p className="text-xs text-ink-soft max-w-md mx-auto">
@@ -1044,7 +1079,7 @@ export const BeforeInterviewHRContent = () => {
 
                       <div className="space-y-4">
                         {(currentApp.repoCodingChallenges || []).map((challenge, idx) => (
-                          <div key={challenge.id} className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-4">
+                          <div key={challenge.id} className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-4 shadow-sm">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                               <div className="font-medium text-sm text-ink">
                                 Challenge {idx + 1}: {challenge.title}
@@ -1100,12 +1135,6 @@ export const BeforeInterviewHRContent = () => {
                                     ))}
                                   </div>
                                 )}
-
-                                {challenge.aiCodeReview.fixSuggestion && (
-                                  <div className="text-[11px] text-ink-soft bg-paper/80 p-2.5 rounded-lg border border-ink/5 mt-1 font-mono">
-                                    <strong>AI Suggestion / Fix: </strong> {challenge.aiCodeReview.fixSuggestion}
-                                  </div>
-                                )}
                               </div>
                             )}
                           </div>
@@ -1116,7 +1145,111 @@ export const BeforeInterviewHRContent = () => {
                 </motion.div>
               )}
 
-              {/* TAB 5: RECRUITER DECISION */}
+              {/* TAB 5: DYNAMIC AI INTERVIEW */}
+              {activeTab === "interview" && (
+                <motion.div
+                  key={currentApp.id + "-interview"}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6"
+                >
+                  <div className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-serif-display text-xl text-ink font-semibold">Dynamic AI Interview Probing</h4>
+                      <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-forest/10 text-forest font-semibold">
+                        Turn-by-Turn Architecture Dialogue
+                      </span>
+                    </div>
+                    <p className="text-xs text-ink-soft">
+                      Real-time technical probing on candidate's repository architecture, scalability tradeoffs, and error handling.
+                    </p>
+
+                    <div className="space-y-4 pt-2">
+                      {(currentApp.aiInterviewDialogue || []).map((dialogue, idx) => (
+                        <div key={idx} className="p-5 rounded-2xl bg-paper-2 border border-ink/10 space-y-3">
+                          <div className="flex items-center justify-between text-xs font-semibold text-forest">
+                            <span>Turn {dialogue.turn}: {dialogue.topic}</span>
+                            <span className="font-mono text-ink-muted">Confidence: {Math.round(dialogue.aiEvaluation.confidence * 100)}%</span>
+                          </div>
+                          <div className="text-xs font-medium text-ink bg-paper p-3 rounded-xl border border-ink/5">
+                            <strong>AI Question: </strong> {dialogue.question}
+                          </div>
+                          <div className="text-xs text-ink-soft pl-3 border-l-2 border-forest">
+                            <strong>Candidate Response: </strong> {dialogue.candidateAnswer}
+                          </div>
+                          <div className="text-[11px] text-forest bg-forest/5 p-2.5 rounded-lg border border-forest/15">
+                            <strong>AI Assessment: </strong> {dialogue.aiEvaluation.demonstratedKnowledge}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 6: SKILL MAP & PLAN */}
+              {activeTab === "skillmap" && (
+                <motion.div
+                  key={currentApp.id + "-skillmap"}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6"
+                >
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Skill Competency Map */}
+                    <div className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-4 shadow-sm">
+                      <h4 className="font-serif-display text-lg text-ink font-semibold flex items-center gap-2">
+                        <Award className="w-4 h-4 text-forest" /> Verified Competency Map
+                      </h4>
+                      <div className="space-y-3">
+                        {(currentApp.skillMap || []).map((sm, i) => (
+                          <div key={i} className="p-3 rounded-xl bg-paper-2 border border-ink/10 flex items-center justify-between text-xs">
+                            <div>
+                              <div className="font-semibold text-ink">{sm.skill}</div>
+                              <div className="text-[10px] text-ink-muted">{sm.category}</div>
+                            </div>
+                            <span className={`px-2.5 py-0.5 rounded-full font-mono text-[10px] font-bold ${
+                              sm.status === "Demonstrated"
+                                ? "bg-forest/15 text-forest"
+                                : sm.status === "Developing"
+                                ? "bg-amber-500/15 text-amber-700"
+                                : "bg-destructive/15 text-destructive"
+                            }`}>
+                              {sm.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Improvement Plan */}
+                    <div className="p-6 rounded-3xl bg-paper border border-ink/15 space-y-4 shadow-sm">
+                      <h4 className="font-serif-display text-lg text-ink font-semibold flex items-center gap-2">
+                        <Compass className="w-4 h-4 text-forest" /> Actionable Improvement Plan
+                      </h4>
+                      <div className="space-y-3">
+                        {(currentApp.improvementPlan || []).map((ip, i) => (
+                          <div key={i} className="p-3.5 rounded-xl bg-paper-2 border border-ink/10 space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-ink">{ip.area}</span>
+                              <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-ink/5 text-ink-muted uppercase">
+                                {ip.priority} Priority
+                              </span>
+                            </div>
+                            <p className="text-ink-soft text-[11px] leading-relaxed">{ip.recommendation}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* TAB 7: HR EVIDENCE DECISION */}
               {activeTab === "hrevidence" && (
                 <motion.div
                   key={currentApp.id + "-hrevidence"}
@@ -1126,7 +1259,7 @@ export const BeforeInterviewHRContent = () => {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  <div className="p-6 rounded-2xl border-2 border-forest/30 bg-paper-2">
+                  <div className="p-6 rounded-3xl border-2 border-forest/30 bg-paper shadow-sm">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                       <div>
                         <div className="text-xs font-mono uppercase tracking-widest text-ink-muted">AI Structured Synthesis</div>
@@ -1139,12 +1272,12 @@ export const BeforeInterviewHRContent = () => {
                       </div>
                     </div>
 
-                    <p className="text-xs text-ink-soft leading-relaxed mb-5 bg-paper p-4 rounded-xl border border-ink/10">
+                    <p className="text-xs text-ink-soft leading-relaxed mb-5 bg-paper-2 p-4 rounded-2xl border border-ink/10">
                       {currentApp.hrEvidence?.summary || `${currentApp.candidateName} underwent complete AI candidate analysis for ${currentApp.jobTitle}. ATS Compatibility: ${currentApp.resumeScore}/100.`}
                     </p>
 
                     <div className="grid sm:grid-cols-2 gap-4 text-xs mb-5">
-                      <div className="p-4 rounded-xl bg-forest/5 border border-forest/20">
+                      <div className="p-4 rounded-2xl bg-forest/5 border border-forest/20">
                         <div className="font-semibold text-forest mb-2 flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4" /> Verified Strengths
                         </div>
@@ -1159,7 +1292,7 @@ export const BeforeInterviewHRContent = () => {
                         </ul>
                       </div>
 
-                      <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
+                      <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20">
                         <div className="font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
                           <HelpCircle className="w-4 h-4 text-amber-600" /> Areas to Clarify / Onboard
                         </div>
@@ -1173,7 +1306,7 @@ export const BeforeInterviewHRContent = () => {
                       </div>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-ink text-paper text-xs flex items-center justify-between flex-wrap gap-3">
+                    <div className="p-4 rounded-2xl bg-ink text-paper text-xs flex items-center justify-between flex-wrap gap-3">
                       <div>
                         <span className="font-semibold text-forest">Recruiter Final Action: </span>
                         <span>{currentApp.hrEvidence?.decisionNotes || "Advance candidate to interview pipeline or reject with note."}</span>
@@ -1201,6 +1334,12 @@ export const BeforeInterviewHRContent = () => {
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+
+          {/* Bottom Footer matching Screenshot */}
+          <div className="p-4 bg-paper-2 border-t border-ink/10 flex items-center justify-between text-xs text-ink-muted">
+            <span>💡 Click through the numbered tabs above or change candidate profiles to inspect live variations.</span>
+            <span className="font-mono text-[11px] text-forest font-medium hidden sm:inline">100% Explainable AI Verification</span>
           </div>
         </div>
       )}
@@ -1259,6 +1398,8 @@ export const BeforeInterviewHRContent = () => {
     </div>
   );
 };
+
+const LockIcon = () => <span className="text-lg">🔒</span>;
 
 export const BeforeInterviewHRPanel = () => {
   return (
