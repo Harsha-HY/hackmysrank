@@ -186,7 +186,7 @@ REQUIRED JSON OUTPUT SCHEMA
 
 Respond ONLY with the JSON object. No Markdown code fences or extra text.`;
 
-  const models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-flash-latest", "gemini-3.8-flash"];
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"];
 
   for (const model of models) {
     try {
@@ -220,7 +220,18 @@ Respond ONLY with the JSON object. No Markdown code fences or extra text.`;
       const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!rawText) continue;
 
-      const parsed: GeminiAnalysisResult = JSON.parse(rawText);
+      let cleanJson = rawText.trim();
+      if (cleanJson.startsWith("```json")) {
+        cleanJson = cleanJson.slice(7);
+      } else if (cleanJson.startsWith("```")) {
+        cleanJson = cleanJson.slice(3);
+      }
+      if (cleanJson.endsWith("```")) {
+        cleanJson = cleanJson.slice(0, -3);
+      }
+      cleanJson = cleanJson.trim();
+
+      const parsed: GeminiAnalysisResult = JSON.parse(cleanJson);
       return parsed;
     } catch (e) {
       console.warn(`Error calling Gemini model ${model}:`, e);

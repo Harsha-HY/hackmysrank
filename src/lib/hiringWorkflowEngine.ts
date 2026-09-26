@@ -771,15 +771,20 @@ export function checkSkillMatch(skill: string, textLower: string): boolean {
     aws: ["aws", "amazon web services", "cloud", "ec2", "s3", "lambda"],
     gcp: ["gcp", "google cloud", "cloud"],
     azure: ["azure", "microsoft cloud", "cloud"],
-    dsa: ["data structures", "algorithms", "dsa", "leetcode", "problem solving"],
-    algorithms: ["algorithms", "dsa", "data structures", "algorithmic"],
-    "system architecture": ["system architecture", "system design", "architecture", "microservices", "distributed"],
-    "system design": ["system design", "system architecture", "scalability", "microservices", "distributed"],
-    "machine learning": ["machine learning", "deep learning", "ai", "ml", "nlp", "llm", "neural"],
-    ai: ["artificial intelligence", "ai", "machine learning", "ml", "llm", "gemini", "gpt"],
+    dsa: ["data structures", "algorithms", "dsa", "leetcode", "problem solving", "binary tree", "graph", "dynamic programming"],
+    algorithms: ["algorithms", "dsa", "data structures", "algorithmic", "sorting", "searching"],
+    "system architecture": ["system architecture", "system design", "architecture", "microservices", "distributed", "scalability"],
+    "system design": ["system design", "system architecture", "scalability", "microservices", "distributed", "caching", "load balancing"],
+    "machine learning": ["machine learning", "deep learning", "ai", "ml", "nlp", "llm", "neural", "pytorch", "tensorflow"],
+    ai: ["artificial intelligence", "ai", "machine learning", "ml", "llm", "gemini", "gpt", "rag"],
     html: ["html", "html5", "css", "frontend", "web"],
     css: ["css", "css3", "tailwind", "sass", "scss", "bootstrap"],
     git: ["git", "github", "gitlab", "version control"],
+    redis: ["redis", "caching", "in-memory", "cache", "distributed cache"],
+    mongodb: ["mongodb", "mongo", "nosql", "document db"],
+    graphql: ["graphql", "apollo", "rest", "api"],
+    "ci/cd": ["ci/cd", "ci", "cd", "github actions", "jenkins", "pipeline", "docker", "automation"],
+    testing: ["test", "testing", "jest", "pytest", "unit test", "integration test", "cypress"],
   };
 
   for (const [key, aliasList] of Object.entries(aliases)) {
@@ -794,7 +799,7 @@ export function checkSkillMatch(skill: string, textLower: string): boolean {
   const tokens = s.split(/[\s,/-]+/).filter((t) => t.length > 2);
   if (tokens.length > 1) {
     const matchedTokens = tokens.filter((t) => textLower.includes(t));
-    if (matchedTokens.length / tokens.length >= 0.5) return true;
+    if (matchedTokens.length / tokens.length >= 0.4) return true;
   }
 
   return false;
@@ -854,13 +859,15 @@ export function evaluateAndSubmitApplication(
   const matchRatio = matched.length / totalRequired;
   let calculatedResumeScore = 50;
 
-  if (matchRatio >= 0.75 || matched.length >= Math.max(1, totalRequired - 1)) {
-    // High match -> 92% - 98%
-    calculatedResumeScore = Math.min(98, Math.max(92, Math.round(92 + matchRatio * 5 + (candidateData.resumeText.length > 100 ? 1 : 0))));
-  } else if (matchRatio >= 0.5) {
-    calculatedResumeScore = Math.round(80 + matchRatio * 15);
+  if (matchRatio >= 0.65 || (matched.length >= 2 && totalRequired <= 3)) {
+    // Strong skill match -> 92% - 98% (Exceeds 90% cutoff)
+    calculatedResumeScore = Math.min(98, Math.max(92, Math.round(92 + matchRatio * 5 + (candidateData.resumeText.length > 80 ? 1 : 0))));
+  } else if (matchRatio >= 0.35) {
+    // Partial skill match -> 70% - 85% (Below 90% cutoff)
+    calculatedResumeScore = Math.round(70 + matchRatio * 20);
   } else {
-    calculatedResumeScore = Math.max(25, Math.round(matchRatio * 70 + 15));
+    // Low / no skill match -> 25% - 50%
+    calculatedResumeScore = Math.max(25, Math.round(matchRatio * 60 + 15));
   }
 
   const cutoff = job.resumeCutoff || 90;
