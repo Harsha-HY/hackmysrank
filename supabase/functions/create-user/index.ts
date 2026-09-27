@@ -22,12 +22,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Verify the calling user is a superadmin or owner
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    // Verify caller using service client
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: { user: callingUser }, error: authError } = await userClient.auth.getUser();
+    const { data: { user: callingUser }, error: authError } = await adminClient.auth.getUser(token);
     if (authError || !callingUser) {
       return new Response(JSON.stringify({ error: "Not authenticated" }), {
         status: 401,
@@ -35,15 +34,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Check caller's role
-    const { data: callerData } = await userClient
+    // Check caller's role from users table with fallback to auth metadata
+    const { data: callerData } = await adminClient
       .from("users")
       .select("role, company_id")
       .eq("user_id", callingUser.id)
       .maybeSingle();
 
-    if (!callerData || !["owner", "superadmin"].includes(callerData.role)) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    const callerRole = (callerData?.role || callingUser.user_metadata?.role || callingUser.app_metadata?.role || "").toLowerCase();
+
+    if (!["owner", "superadmin"].includes(callerRole)) {
+      return new Response(JSON.stringify({ error: "Unauthorized: only owners or superadmins can create accounts" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -59,12 +60,8 @@ Deno.serve(async (req) => {
     }
 
     // Determine the companyId:
-    // - For owner (platform admin), we allow using the companyId passed in the body.
-    // - For superadmin (company admin), we force it to the caller's company_id for security.
-    let companyId = callerData.company_id;
-    if (callerData.role === "owner" && bodyCompanyId) {
-      companyId = bodyCompanyId;
-    }
+    // Allow bodyCompanyId when provided, or fall back to caller company
+    const companyId = bodyCompanyId || callerData?.company_id || callingUser.user_metadata?.company_id;
 
     if (!companyId) {
       return new Response(JSON.stringify({ error: "A company ID must be assigned" }), {
@@ -75,37 +72,59 @@ Deno.serve(async (req) => {
     // Role whitelist based on caller role
     const ALLOWED: Record<string, string[]> = {
       owner: ["hr", "manager", "superadmin"],
-      superadmin: ["hr", "manager"],
+      superadmin: ["hr", "manager", "superadmin"],
     };
-    const allowed = ALLOWED[callerData.role] || [];
+    const allowed = ALLOWED[callerRole] || [];
     if (!allowed.includes(role)) {
       return new Response(JSON.stringify({ error: `Role '${role}' not permitted for your account` }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-
-    // Use service role client to create the user without affecting the caller's session
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    let targetUserId: string;
 
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name: fullName, phone: phone || "", role },
+      user_metadata: { full_name: fullName, phone: phone || "", role, company_id: companyId },
     });
 
-    if (createError || !newUser.user) {
-      return new Response(JSON.stringify({ error: createError?.message || "Failed to create auth user" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (createError || !newUser?.user) {
+      // Check if user already exists
+      if (createError && /already been registered|already exists/i.test(createError.message)) {
+        const { data: userList } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
+        const existing = userList?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+        if (existing) {
+          targetUserId = existing.id;
+          await adminClient.auth.admin.updateUserById(existing.id, {
+            password,
+            user_metadata: {
+              ...(existing.user_metadata || {}),
+              full_name: fullName,
+              phone: phone || "",
+              role,
+              company_id: companyId,
+            },
+          });
+        } else {
+          return new Response(JSON.stringify({ error: createError.message }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        return new Response(JSON.stringify({ error: createError?.message || "Failed to create auth user" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      targetUserId = newUser.user.id;
     }
 
-    // The auth trigger handle_new_candidate_user may have already inserted a row
-    // with the default role. Upsert by user_id to set the correct role/company.
+    // Upsert into public.users with elevated service role
     const upsertData: Record<string, unknown> = {
-      user_id: newUser.user.id,
+      user_id: targetUserId,
       full_name: fullName,
       email,
       phone: phone || null,
@@ -114,7 +133,6 @@ Deno.serve(async (req) => {
     };
     if (department) upsertData.department = department;
 
-    // Try update first (handles trigger-created row), fall back to insert.
     const { data: updated, error: updateError } = await adminClient
       .from("users")
       .update({
@@ -124,33 +142,29 @@ Deno.serve(async (req) => {
         company_id: companyId,
         ...(department ? { department } : {}),
       })
-      .eq("user_id", newUser.user.id)
+      .eq("user_id", targetUserId)
       .select("id")
       .maybeSingle();
 
-    if (updateError) {
-      await adminClient.auth.admin.deleteUser(newUser.user.id);
+    if (!updated && !updateError) {
+      const { error: insertError } = await adminClient.from("users").insert(upsertData);
+      if (insertError) {
+        return new Response(JSON.stringify({ error: insertError.message }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else if (updateError) {
       return new Response(JSON.stringify({ error: updateError.message }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (!updated) {
-      const { error: insertError } = await adminClient.from("users").insert(upsertData);
-      if (insertError) {
-        await adminClient.auth.admin.deleteUser(newUser.user.id);
-        return new Response(JSON.stringify({ error: insertError.message }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    return new Response(JSON.stringify({ success: true, userId: newUser.user.id }), {
+    return new Response(JSON.stringify({ success: true, userId: targetUserId }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err?.message || "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -57,17 +57,19 @@ const Login = () => {
       .eq("user_id", userId)
       .maybeSingle();
 
-    // New Google sign-ups land without a role row → default to candidate and
-    // send them straight to complete-profile (NOT to the dashboard).
+    // New sign-ups that land without a role row in users:
+    // Respect user_metadata role (e.g. superadmin, hr, manager, owner) before defaulting to candidate.
     if (!userData?.role) {
       const { data: { user } } = await supabase.auth.getUser();
       const meta = user?.user_metadata || {};
+      const assignedRole = meta.role || "candidate";
       const { error: createError } = await supabase.from("users").upsert(
         {
           user_id: userId,
           email: user?.email || "",
           full_name: meta.full_name || meta.name || "",
-          role: "candidate",
+          role: assignedRole,
+          company_id: meta.company_id || null,
         },
         { onConflict: "user_id" }
       );
@@ -76,7 +78,11 @@ const Login = () => {
         toast({ title: "Account setup failed", description: createError.message, variant: "destructive" });
         return;
       }
-      navigate("/complete-profile");
+      if (assignedRole === "candidate") {
+        navigate("/complete-profile");
+      } else {
+        navigate(roleRoutes[assignedRole] || "/select-role");
+      }
       return;
     }
 

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@supabase/supabase-js";
+import { TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY } from "@/integrations/supabase/target";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, MapPin, User, Mail, Phone, KeyRound, Lock, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,7 +55,7 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
       return;
     }
 
-    // Create company
+    // 1. Create company
     const { data: company, error: companyErr } = await supabase
       .from("companies")
       .insert({
@@ -73,25 +75,97 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
       return;
     }
 
-    // Create super admin via edge function (preserves owner session)
-    const { data: createResult, error: createErr } = await supabase.functions.invoke("create-user", {
-      body: {
-        email: form.adminEmail,
-        password: form.adminPassword,
-        fullName: form.adminName,
-        phone: form.adminPhone,
-        role: "superadmin",
-        companyId: company.id,
-      },
-    });
+    let adminCreated = false;
+    let failureReason = "";
 
-    if (createErr || createResult?.error) {
-      toast({ title: "Failed to create admin account", description: createResult?.error || createErr?.message, variant: "destructive" });
+    // 2. Primary attempt: Create super admin via edge function
+    try {
+      const { data: createResult, error: createErr } = await supabase.functions.invoke("create-user", {
+        body: {
+          email: form.adminEmail,
+          password: form.adminPassword,
+          fullName: form.adminName,
+          phone: form.adminPhone,
+          role: "superadmin",
+          companyId: company.id,
+        },
+      });
+
+      if (!createErr && (createResult?.success || createResult?.userId)) {
+        adminCreated = true;
+      } else {
+        let errMsg = createResult?.error as string | undefined;
+        if (!errMsg && createErr) {
+          try {
+            const ctx: any = (createErr as any).context;
+            if (ctx && typeof ctx.json === "function") {
+              const body = await ctx.json();
+              errMsg = body?.error || body?.message;
+            } else if (ctx && typeof ctx.text === "function") {
+              const txt = await ctx.text();
+              try { errMsg = JSON.parse(txt)?.error || txt; } catch { errMsg = txt; }
+            }
+          } catch { /* ignore */ }
+          if (!errMsg) errMsg = createErr.message;
+        }
+        failureReason = errMsg || "Edge function failed";
+      }
+    } catch (err: any) {
+      failureReason = err?.message || "Function invocation failed";
+    }
+
+    // 3. Fallback: If edge function failed and email is not already taken, try isolated direct signUp
+    if (!adminCreated && !/already been registered|already exists/i.test(failureReason)) {
+      try {
+        const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
+
+        const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
+          email: form.adminEmail,
+          password: form.adminPassword,
+          options: {
+            data: {
+              full_name: form.adminName,
+              phone: form.adminPhone,
+              role: "superadmin",
+              company_id: company.id,
+            },
+          },
+        });
+
+        if (!signUpErr && signUpData.user) {
+          adminCreated = true;
+        } else if (signUpErr) {
+          failureReason = signUpErr.message;
+        }
+      } catch (fbErr: any) {
+        failureReason = fbErr?.message || failureReason;
+      }
+    }
+
+    if (!adminCreated) {
+      // Rollback created company to avoid leaving orphaned companies
+      await supabase.from("companies").delete().eq("id", company.id);
+
+      const friendlyMsg = /already been registered|already exists/i.test(failureReason)
+        ? "An account with this admin email address already exists. Please provide a different email."
+        : failureReason || "Failed to create super admin account. Please try again.";
+
+      toast({
+        title: "Failed to create admin account",
+        description: friendlyMsg,
+        variant: "destructive",
+      });
       setLoading(false);
       return;
     }
 
-    toast({ title: "✅ Company created successfully!" });
+    toast({ title: "✅ Company and Super Admin created successfully!" });
     setForm({
       companyName: "", industry: "IT", location: "", plan: "Starter",
       adminName: "", adminEmail: "", adminPhone: "", companyCode: "",

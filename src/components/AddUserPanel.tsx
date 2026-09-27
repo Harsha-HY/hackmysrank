@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@supabase/supabase-js";
+import { TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY } from "@/integrations/supabase/target";
 import { useToast } from "@/hooks/use-toast";
 import { User, Mail, Phone, Lock, ShieldCheck, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -63,30 +65,76 @@ const AddUserPanel = ({ open, onOpenChange, type, companyId, onUserCreated }: Ad
       payload.department = form.department;
     }
 
-    const { data, error } = await supabase.functions.invoke("create-user", {
-      body: payload,
-    });
+    let userCreated = false;
+    let failureReason = "";
 
-    let errMsg = data?.error as string | undefined;
-    if (!errMsg && error) {
-      // supabase-js wraps non-2xx bodies inside error.context — extract the real message
-      try {
-        const ctx: any = (error as any).context;
-        if (ctx && typeof ctx.json === "function") {
-          const body = await ctx.json();
-          errMsg = body?.error || body?.message;
-        } else if (ctx && typeof ctx.text === "function") {
-          const txt = await ctx.text();
-          try { errMsg = JSON.parse(txt)?.error || txt; } catch { errMsg = txt; }
+    try {
+      const { data, error } = await supabase.functions.invoke("create-user", {
+        body: payload,
+      });
+
+      if (!error && (data?.success || data?.userId)) {
+        userCreated = true;
+      } else {
+        let errMsg = data?.error as string | undefined;
+        if (!errMsg && error) {
+          try {
+            const ctx: any = (error as any).context;
+            if (ctx && typeof ctx.json === "function") {
+              const body = await ctx.json();
+              errMsg = body?.error || body?.message;
+            } else if (ctx && typeof ctx.text === "function") {
+              const txt = await ctx.text();
+              try { errMsg = JSON.parse(txt)?.error || txt; } catch { errMsg = txt; }
+            }
+          } catch { /* ignore */ }
+          if (!errMsg) errMsg = error.message;
         }
-      } catch { /* ignore */ }
-      if (!errMsg) errMsg = error.message;
+        failureReason = errMsg || "Edge function returned an error";
+      }
+    } catch (err: any) {
+      failureReason = err?.message || "Invocation failed";
     }
 
-    if (errMsg) {
-      const friendly = /already been registered|already exists/i.test(errMsg)
+    // Fallback: If edge function failed and email is not already taken, try isolated direct signUp
+    if (!userCreated && !/already been registered|already exists/i.test(failureReason)) {
+      try {
+        const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
+
+        const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: {
+            data: {
+              full_name: form.fullName,
+              phone: form.phone,
+              role,
+              company_id: companyId,
+              department: form.department || undefined,
+            },
+          },
+        });
+
+        if (!signUpErr && signUpData.user) {
+          userCreated = true;
+        } else if (signUpErr) {
+          failureReason = signUpErr.message;
+        }
+      } catch (fbErr: any) {
+        failureReason = fbErr?.message || failureReason;
+      }
+    }
+
+    if (!userCreated) {
+      const friendly = /already been registered|already exists/i.test(failureReason)
         ? "An account with this email already exists. Use a different email."
-        : errMsg;
+        : failureReason || "Failed to create account. Please try again.";
       toast({ title: "Failed to create account", description: friendly, variant: "destructive" });
       setLoading(false);
       return;

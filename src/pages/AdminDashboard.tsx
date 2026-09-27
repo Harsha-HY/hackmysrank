@@ -163,12 +163,13 @@ const AdminDashboard = () => {
     if (user) {
       setAdminUserId(user.id);
       setAdminName(user.full_name);
-      if (user.company_id) {
-        setCompanyId(user.company_id);
+      const effectiveCompanyId = user.company_id || session.user.user_metadata?.company_id;
+      if (effectiveCompanyId) {
+        setCompanyId(effectiveCompanyId);
         const { data: company } = await supabase
           .from("companies")
           .select("company_name")
-          .eq("id", user.company_id)
+          .eq("id", effectiveCompanyId)
           .maybeSingle();
         if (company) setCompanyName(company.company_name);
 
@@ -176,7 +177,7 @@ const AdminDashboard = () => {
           .from("users")
           .select("*")
           .eq("role", "hr")
-          .eq("company_id", user.company_id)
+          .eq("company_id", effectiveCompanyId)
           .order("created_at", { ascending: false });
         if (hrs) setHrManagers(hrs);
 
@@ -184,7 +185,7 @@ const AdminDashboard = () => {
           .from("users")
           .select("*")
           .eq("role", "manager")
-          .eq("company_id", user.company_id)
+          .eq("company_id", effectiveCompanyId)
           .order("created_at", { ascending: false });
         if (managers) setHiringManagers(managers);
 
