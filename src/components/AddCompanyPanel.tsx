@@ -87,9 +87,60 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
     let adminCreated = false;
     let failureReason = "";
 
-    // 2. Primary attempt: Create super admin via edge function
+    // 2. Primary: Create Super Admin directly using isolated auth client (preserves owner session)
     try {
-      const { data: createResult, error: createErr } = await supabase.functions.invoke("create-user", {
+      const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      });
+
+      const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
+        email: form.adminEmail,
+        password: form.adminPassword,
+        options: {
+          data: {
+            full_name: form.adminName,
+            phone: form.adminPhone,
+            role: "superadmin",
+            company_id: company.id,
+          },
+        },
+      });
+
+      if (!signUpErr && signUpData.user) {
+        adminCreated = true;
+      } else if (signUpErr && /already been registered|already exists/i.test(signUpErr.message)) {
+        // Account exists: link and update superadmin metadata with provided password
+        const { data: signInData, error: signInErr } = await isolatedAuth.auth.signInWithPassword({
+          email: form.adminEmail,
+          password: form.adminPassword,
+        });
+        if (!signInErr && signInData?.user) {
+          await isolatedAuth.auth.updateUser({
+            data: {
+              full_name: form.adminName,
+              phone: form.adminPhone,
+              role: "superadmin",
+              company_id: company.id,
+            },
+          });
+          adminCreated = true;
+        } else {
+          failureReason = "An account with this email already exists. Please enter its existing password or use a different email.";
+        }
+      } else if (signUpErr) {
+        failureReason = signUpErr.message;
+      }
+    } catch (fbErr: any) {
+      failureReason = fbErr?.message || "Auth sign up failed";
+    }
+
+    // Optional background sync with edge function (non-blocking)
+    if (adminCreated) {
+      supabase.functions.invoke("create-user", {
         body: {
           email: form.adminEmail,
           password: form.adminPassword,
@@ -98,85 +149,7 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
           role: "superadmin",
           companyId: company.id,
         },
-      });
-
-      if (!createErr && (createResult?.success || createResult?.userId)) {
-        adminCreated = true;
-      } else {
-        let errMsg = createResult?.error as string | undefined;
-        if (!errMsg && createErr) {
-          try {
-            const ctx: any = (createErr as any).context;
-            if (ctx && typeof ctx.json === "function") {
-              const body = await ctx.json();
-              errMsg = body?.error || body?.message;
-            } else if (ctx && typeof ctx.text === "function") {
-              const txt = await ctx.text();
-              try { errMsg = JSON.parse(txt)?.error || txt; } catch { errMsg = txt; }
-            }
-          } catch { /* ignore */ }
-          if (!errMsg) errMsg = createErr.message;
-        }
-        failureReason = errMsg || "Edge function failed";
-      }
-    } catch (err: any) {
-      failureReason = err?.message || "Function invocation failed";
-    }
-
-    // 3. Fallback: If edge function failed, try isolated direct signUp or adoption
-    if (!adminCreated) {
-      try {
-        const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
-        });
-
-        const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
-          email: form.adminEmail,
-          password: form.adminPassword,
-          options: {
-            data: {
-              full_name: form.adminName,
-              phone: form.adminPhone,
-              role: "superadmin",
-              company_id: company.id,
-            },
-          },
-        });
-
-        if (!signUpErr && signUpData.user) {
-          adminCreated = true;
-        } else if (
-          (signUpErr && /already been registered|already exists/i.test(signUpErr.message)) ||
-          /already been registered|already exists/i.test(failureReason)
-        ) {
-          // Account already exists: attempt to link and set superadmin metadata with provided credentials
-          const { data: signInData, error: signInErr } = await isolatedAuth.auth.signInWithPassword({
-            email: form.adminEmail,
-            password: form.adminPassword,
-          });
-          if (!signInErr && signInData?.user) {
-            await isolatedAuth.auth.updateUser({
-              data: {
-                full_name: form.adminName,
-                phone: form.adminPhone,
-                role: "superadmin",
-                company_id: company.id,
-              },
-            });
-            adminCreated = true;
-          } else {
-            failureReason = "An account with this email already exists. Please enter its existing password or use a different email.";
-          }
-        } else if (signUpErr) {
-          failureReason = signUpErr.message;
-        }
-      } catch (fbErr: any) {
-        failureReason = fbErr?.message || failureReason;
-      }
+      }).catch(() => { /* non-blocking sync */ });
     }
 
     if (!adminCreated) {

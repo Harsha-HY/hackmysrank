@@ -78,48 +78,38 @@ const AddUserPanel = ({ open, onOpenChange, type, companyId, onUserCreated }: Ad
     let failureReason = "";
 
     try {
-      const { data, error } = await supabase.functions.invoke("create-user", {
-        body: payload,
+      const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
       });
 
-      if (!error && (data?.success || data?.userId)) {
-        userCreated = true;
-      } else {
-        let errMsg = data?.error as string | undefined;
-        if (!errMsg && error) {
-          try {
-            const ctx: any = (error as any).context;
-            if (ctx && typeof ctx.json === "function") {
-              const body = await ctx.json();
-              errMsg = body?.error || body?.message;
-            } else if (ctx && typeof ctx.text === "function") {
-              const txt = await ctx.text();
-              try { errMsg = JSON.parse(txt)?.error || txt; } catch { errMsg = txt; }
-            }
-          } catch { /* ignore */ }
-          if (!errMsg) errMsg = error.message;
-        }
-        failureReason = errMsg || "Edge function returned an error";
-      }
-    } catch (err: any) {
-      failureReason = err?.message || "Invocation failed";
-    }
-
-    // Fallback: If edge function failed and email is not already taken, try isolated direct signUp
-    if (!userCreated && !/already been registered|already exists/i.test(failureReason)) {
-      try {
-        const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
+      const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: {
+            full_name: form.fullName,
+            phone: form.phone,
+            role,
+            company_id: companyId,
+            department: form.department || undefined,
           },
-        });
+        },
+      });
 
-        const { data: signUpData, error: signUpErr } = await isolatedAuth.auth.signUp({
+      if (!signUpErr && signUpData.user) {
+        userCreated = true;
+      } else if (signUpErr && /already been registered|already exists/i.test(signUpErr.message)) {
+        // Link and update metadata if credentials match
+        const { data: signInData, error: signInErr } = await isolatedAuth.auth.signInWithPassword({
           email: form.email,
           password: form.password,
-          options: {
+        });
+        if (!signInErr && signInData?.user) {
+          await isolatedAuth.auth.updateUser({
             data: {
               full_name: form.fullName,
               phone: form.phone,
@@ -127,17 +117,21 @@ const AddUserPanel = ({ open, onOpenChange, type, companyId, onUserCreated }: Ad
               company_id: companyId,
               department: form.department || undefined,
             },
-          },
-        });
-
-        if (!signUpErr && signUpData.user) {
+          });
           userCreated = true;
-        } else if (signUpErr) {
-          failureReason = signUpErr.message;
+        } else {
+          failureReason = "An account with this email already exists. Please enter its existing password or use a different email.";
         }
-      } catch (fbErr: any) {
-        failureReason = fbErr?.message || failureReason;
+      } else if (signUpErr) {
+        failureReason = signUpErr.message;
       }
+    } catch (fbErr: any) {
+      failureReason = fbErr?.message || "User creation failed";
+    }
+
+    // Optional background sync
+    if (userCreated) {
+      supabase.functions.invoke("create-user", { body: payload }).catch(() => {});
     }
 
     if (!userCreated) {

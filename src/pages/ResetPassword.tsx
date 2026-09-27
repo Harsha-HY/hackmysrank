@@ -21,23 +21,68 @@ const ResetPassword = () => {
   const [valid, setValid] = useState(false);
 
   useEffect(() => {
-    // Supabase places a recovery session in the URL hash. Setting up the listener
-    // means the session is set by the time we render.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") setValid(true);
-    });
-    (async () => {
+    let mounted = true;
+
+    const init = async () => {
+      // 1. Check for PKCE exchange code in URL search params
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      if (code) {
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error && data?.session) {
+            if (mounted) {
+              setValid(true);
+              setReady(true);
+            }
+            return;
+          }
+        } catch (e) {
+          console.error("Code exchange error:", e);
+        }
+      }
+
+      // 2. Check for hash fragment token (implicit flow / recovery link)
+      const hash = window.location.hash;
+      if (hash && (hash.includes("access_token") || hash.includes("type=recovery"))) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
+
+      // 3. Check active session
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) setValid(true);
-      setReady(true);
-    })();
-    return () => subscription.unsubscribe();
+      if (mounted) {
+        if (session) setValid(true);
+        setReady(true);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || event === "USER_UPDATED") {
+        if (mounted) setValid(true);
+      }
+    });
+
+    init();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.length < 6) {
+    const pwd = password;
+    if (pwd.length < 6) {
       toast({ title: "Password too short", description: "Use at least 6 characters.", variant: "destructive" });
+      return;
+    }
+    if (!/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(pwd)) {
+      toast({
+        title: "Weak password",
+        description: "Password must contain uppercase (A-Z), lowercase (a-z), digit (0-9), and special character (e.g. Pass#1234).",
+        variant: "destructive",
+      });
       return;
     }
     if (password !== confirmPwd) {
@@ -51,7 +96,7 @@ const ResetPassword = () => {
       toast({ title: "Could not update password", description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Password updated", description: "Sign in with your new password." });
+    toast({ title: "Password updated successfully!", description: "Sign in with your new password." });
     await supabase.auth.signOut();
     navigate("/login");
   };
@@ -96,6 +141,7 @@ const ResetPassword = () => {
                   {show ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
+              <p className="text-xs text-[#8892a4] -mt-2 ml-1">Must include: A-Z, a-z, 0-9, and a symbol (e.g. Pass#1234)</p>
               <input
                 type={show ? "text" : "password"}
                 required minLength={6}
