@@ -39,8 +39,17 @@ const AddUserPanel = ({ open, onOpenChange, type, companyId, onUserCreated }: Ad
       toast({ title: "Passwords do not match", variant: "destructive" });
       return;
     }
-    if (form.password.length < 6) {
-      toast({ title: "Password must be at least 6 characters", variant: "destructive" });
+    const pwd = form.password;
+    if (pwd.length < 6) {
+      toast({ title: "Password too short", description: "Password must be at least 6 characters.", variant: "destructive" });
+      return;
+    }
+    if (!/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(pwd)) {
+      toast({
+        title: "Weak password",
+        description: "Password must contain uppercase (A-Z), lowercase (a-z), digit (0-9), and special character (e.g. Staff#2026).",
+        variant: "destructive",
+      });
       return;
     }
     setLoading(true);
@@ -182,6 +191,7 @@ const AddUserPanel = ({ open, onOpenChange, type, companyId, onUserCreated }: Ad
             <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input type="password" placeholder="Password" required minLength={6} value={form.password} onChange={(e) => update("password", e.target.value)} className={inputClass} />
           </div>
+          <p className="text-xs text-muted-foreground -mt-2 ml-1">Must include A-Z, a-z, 0-9, and a symbol (e.g. Staff#2026)</p>
           <div className="relative">
             <ShieldCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input type="password" placeholder="Confirm Password" required minLength={6} value={form.confirmPassword} onChange={(e) => update("confirmPassword", e.target.value)} className={inputClass} />

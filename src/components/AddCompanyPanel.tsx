@@ -42,8 +42,17 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
       toast({ title: "Passwords do not match", variant: "destructive" });
       return;
     }
-    if (form.adminPassword.length < 6) {
-      toast({ title: "Password must be at least 6 characters", variant: "destructive" });
+    const pwd = form.adminPassword;
+    if (pwd.length < 6) {
+      toast({ title: "Password too short", description: "Password must be at least 6 characters.", variant: "destructive" });
+      return;
+    }
+    if (!/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(pwd)) {
+      toast({
+        title: "Weak password",
+        description: "Password must contain uppercase (A-Z), lowercase (a-z), digit (0-9), and special character (e.g. Admin#2026).",
+        variant: "destructive",
+      });
       return;
     }
     setLoading(true);
@@ -114,8 +123,8 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
       failureReason = err?.message || "Function invocation failed";
     }
 
-    // 3. Fallback: If edge function failed and email is not already taken, try isolated direct signUp
-    if (!adminCreated && !/already been registered|already exists/i.test(failureReason)) {
+    // 3. Fallback: If edge function failed, try isolated direct signUp or adoption
+    if (!adminCreated) {
       try {
         const isolatedAuth = createClient(TARGET_SUPABASE_URL, TARGET_SUPABASE_PUBLISHABLE_KEY, {
           auth: {
@@ -140,6 +149,28 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
 
         if (!signUpErr && signUpData.user) {
           adminCreated = true;
+        } else if (
+          (signUpErr && /already been registered|already exists/i.test(signUpErr.message)) ||
+          /already been registered|already exists/i.test(failureReason)
+        ) {
+          // Account already exists: attempt to link and set superadmin metadata with provided credentials
+          const { data: signInData, error: signInErr } = await isolatedAuth.auth.signInWithPassword({
+            email: form.adminEmail,
+            password: form.adminPassword,
+          });
+          if (!signInErr && signInData?.user) {
+            await isolatedAuth.auth.updateUser({
+              data: {
+                full_name: form.adminName,
+                phone: form.adminPhone,
+                role: "superadmin",
+                company_id: company.id,
+              },
+            });
+            adminCreated = true;
+          } else {
+            failureReason = "An account with this email already exists. Please enter its existing password or use a different email.";
+          }
         } else if (signUpErr) {
           failureReason = signUpErr.message;
         }
@@ -152,8 +183,8 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
       // Rollback created company to avoid leaving orphaned companies
       await supabase.from("companies").delete().eq("id", company.id);
 
-      const friendlyMsg = /already been registered|already exists/i.test(failureReason)
-        ? "An account with this admin email address already exists. Please provide a different email."
+      const friendlyMsg = /password should contain/i.test(failureReason)
+        ? "Password must contain uppercase (A-Z), lowercase (a-z), digit (0-9), and special character (e.g. Admin#2026)."
         : failureReason || "Failed to create super admin account. Please try again.";
 
       toast({
@@ -226,7 +257,7 @@ const AddCompanyPanel = ({ open, onOpenChange, onCompanyCreated }: AddCompanyPan
                 { icon: Mail, key: "adminEmail", placeholder: "Admin Email", type: "email" },
                 { icon: Phone, key: "adminPhone", placeholder: "Admin Phone", type: "tel" },
                 { icon: KeyRound, key: "companyCode", placeholder: "Company Code", type: "text", hint: "Example: TECH-2024-ABC" },
-                { icon: Lock, key: "adminPassword", placeholder: "Admin Password", type: "password" },
+                { icon: Lock, key: "adminPassword", placeholder: "Admin Password", type: "password", hint: "Must include A-Z, a-z, 0-9, and a symbol (e.g. Admin#2026)" },
                 { icon: ShieldCheck, key: "confirmPassword", placeholder: "Confirm Password", type: "password" },
               ].map(({ icon: Icon, key, placeholder, type, hint }) => (
                 <div key={key}>
